@@ -17,6 +17,7 @@
 
 // For using the sky model.
 #include "PragueSkyModelTest.hpp"
+#include "SkyPathTracer.h"
 
 // For GUI.
 #include <chrono>
@@ -274,7 +275,7 @@ static void colorFloatTo8Bit(const float* src, uint8_t* dst, const float exposur
     dst[3] = 255;
 }
 
-void convertToTexture(const std::vector<float>& image,
+void convertToTexture(const float*              image,
                       const int                 resolution,
                       const float               exposure,
                       const int                 tonemapChoice,
@@ -395,6 +396,7 @@ void errorMarker(const char* desc) {
 int main(int argc, char* argv[]) {
     PragueSkyModel                  skyModel;
     std::vector<std::vector<float>> result;
+    float*                          resultPt = NULL;
     void*                           texture = NULL;
     const char* modes[] = { "Sky radiance", "Sun radiance", "Polarisation", "Transmittance" };
     const char* tonemaps[] = { "None", "ACES", "Reinhard", "Uncharted2" };
@@ -596,6 +598,7 @@ int main(int argc, char* argv[]) {
         static bool        rendering          = false;
         static std::string renderError        = "";
         static long long   renderTime         = 0;
+        static long long   renderTimePt       = 0;
         static bool        saved              = false;
         static std::string saveError          = "";
         static int         tonemapper         = 0;
@@ -605,6 +608,13 @@ int main(int argc, char* argv[]) {
         static int         visibilityToLoad   = 0;
         static int         wavelength         = 280;
         static float       zoom               = 2.0f;
+        static skyPathTracerParams ptParams   = {
+                1, /* OZONE_ABSORPTION */
+                16, /* SHADOW_STEPS */
+                1.0f, /* BASE_DENSITY */
+                10000.0f, /* SUN_STRENGTH */
+                8 /* STEPS */
+        };
 
         // Input window
         {
@@ -799,6 +809,18 @@ int main(int argc, char* argv[]) {
                            result);
                     std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
                     renderTime = std::chrono::duration_cast<std::chrono::milliseconds>(end - begin).count();
+                    begin = std::chrono::steady_clock::now();
+                    renderPathTracer(ptParams,
+                           albedo,
+                           altitude,
+                           azimuth,
+                           elevation,
+                           resolution,
+                           view,
+                           visibility,
+                           &resultPt);
+                    end = std::chrono::steady_clock::now();
+                    renderTimePt = std::chrono::duration_cast<std::chrono::milliseconds>(end - begin).count();
                     rendered   = true;
                     updateTexture      = true;
                     renderedResolution = resolution;
@@ -818,7 +840,7 @@ int main(int argc, char* argv[]) {
             if (rendered && !rendering) {
                 ImGui::SameLine();
                 std::ostringstream out;
-                out << "OK (" << renderTime << " ms)";
+                out << "OK (" << renderTime << "|" << renderTimePt << " ms)";
                 ImGui::Text(out.str().c_str());
             } else if (!renderError.empty() && !rendering) {
                 ImGui::SameLine();
@@ -826,6 +848,43 @@ int main(int argc, char* argv[]) {
             }
 
             // Configuration section end
+            ImGui::Dummy(ImVec2(0.0f, 1.0f));
+            ImGui::Separator();
+            if (!loaded || loading) {
+                ImGui::EndDisabled();
+            }
+
+            /////////////////////////////////////////////
+            // Path Tracer Configuration section
+            /////////////////////////////////////////////
+
+            if (!loaded || loading) {
+                ImGui::BeginDisabled(true);
+            }
+            ImGui::Text("Path Tracer Configuration:");
+            ImGui::SliderFloat("density", &ptParams.base_density, 0.0f, 10.0f, "%.1f");
+            ImGui::SameLine();
+            helpMarker("Density of the atmosphere");
+            ImGui::SliderFloat("sun intensity", &ptParams.sun_strength, 0.0f, 1000000.0f, "%.1f");
+            ImGui::SameLine();
+            helpMarker("Intensity of sun");
+            ImGui::Checkbox("ozone absorption", (bool*)&ptParams.ozone_absorption);
+            ImGui::DragInt("steps",
+                               &ptParams.steps,
+                               1,
+                               1,
+                               10000,
+                               "%d",
+                               ImGuiSliderFlags_AlwaysClamp);
+            ImGui::DragInt("shadow steps",
+                               &ptParams.shadow_steps,
+                               1,
+                               1,
+                               10000,
+                               "%d",
+                               ImGuiSliderFlags_AlwaysClamp);
+
+
             ImGui::Dummy(ImVec2(0.0f, 1.0f));
             ImGui::Separator();
             if (!loaded || loading) {
@@ -997,9 +1056,9 @@ int main(int argc, char* argv[]) {
 
                 } else {
                     if (displayPathTrace) {
-
+                        convertToTexture(resultPt, renderedResolution, exposure, tonemapper, &texture);
                     } else {
-                        convertToTexture(result[0], renderedResolution, exposure, tonemapper, &texture);
+                        convertToTexture(&result[0][0], renderedResolution, exposure, tonemapper, &texture);
                     }
                 }
             }
