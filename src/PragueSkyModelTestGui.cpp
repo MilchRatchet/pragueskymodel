@@ -156,9 +156,34 @@ LRESULT WINAPI WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 }
 #endif
 
-unsigned char pixToTex(const float pixel, const float mult) {
-    const float noGamma = std::pow(pixel * mult, 1.f / 2.2f);
-    return (unsigned char)(std::floor(std::clamp(noGamma * 255.f, 0.f, 255.f)));
+static float linearRGB_to_sRGB(const float value) {
+    /*
+     * Original: std:pow(value, 1.0f / 2.2f);
+     * This is what I use in Luminary
+     */
+    if (value <= 0.0031308f) {
+        return 12.92f * value;
+    }
+    else {
+        return 1.055f * std::pow(value, 0.416666666667f) - 0.055f;
+    }
+}
+
+// src is 3 values but dst is 4, don't ask, I don't make the rules
+static void colorFloatTo8Bit(const float* src, uint8_t* dst, const float exposure) {
+    float r = src[0] * exposure;
+    float g = src[1] * exposure;
+    float b = src[2] * exposure;
+
+
+    r = linearRGB_to_sRGB(r);
+    g = linearRGB_to_sRGB(g);
+    b = linearRGB_to_sRGB(b);
+
+    dst[0] = (uint8_t)(std::floor(std::clamp(r * 255.9f, 0.0f, 255.9f)));
+    dst[1] = (uint8_t)(std::floor(std::clamp(g * 255.9f, 0.0f, 255.9f)));
+    dst[2] = (uint8_t)(std::floor(std::clamp(b * 255.9f, 0.0f, 255.9f)));
+    dst[3] = 255;
 }
 
 void convertToTexture(const std::vector<float>& image,
@@ -166,18 +191,12 @@ void convertToTexture(const std::vector<float>& image,
                       const float               exposure,
                       void**                    texture) {
     // Apply exposure and convert float RGB to byte RGBA
-    std::vector<unsigned char> rawData;
+    std::vector<uint8_t> rawData;
     rawData.resize(size_t(resolution) * resolution * 4);
     const float expMult = std::pow(2.f, exposure);
     for (int x = 0; x < resolution; x++) {
         for (int y = 0; y < resolution; y++) {
-            rawData[(size_t(x) * resolution + y) * 4] =
-                pixToTex(image[(size_t(x) * resolution + y) * 3], expMult);
-            rawData[(size_t(x) * resolution + y) * 4 + 1] =
-                pixToTex(image[(size_t(x) * resolution + y) * 3 + 1], expMult);
-            rawData[(size_t(x) * resolution + y) * 4 + 2] =
-                pixToTex(image[(size_t(x) * resolution + y) * 3 + 2], expMult);
-            rawData[(size_t(x) * resolution + y) * 4 + 3] = 255;
+            colorFloatTo8Bit(&image[(size_t(x) * resolution + y) * 3], &rawData[(size_t(x) * resolution + y) * 4], expMult);
         }
     }
 
