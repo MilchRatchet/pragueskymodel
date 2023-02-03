@@ -119,7 +119,7 @@ int main(int argc, char* argv[]) {
         skyModel.initialize(dataset, visibility);
 
         // Render sky image according to the given configuration.
-        render(skyModel, albedo, altitude, azimuth, elevation, mode, resolution, view, visibility, result);
+        render(skyModel, albedo, altitude, azimuth, elevation, resolution, view, visibility, result);
 
         // Save the result buffer into an EXR file.
         const char* err = nullptr;

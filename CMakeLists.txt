@@ -67,8 +67,6 @@ target_link_libraries(PragueSkyModelGui PRIVATE Dwmapi.lib)
 # Linux
 else()
 
-set(CMAKE_CXX_FLAGS "-DNDEBUG")
-
 # Command-line version
 
 find_package(TBB REQUIRED)

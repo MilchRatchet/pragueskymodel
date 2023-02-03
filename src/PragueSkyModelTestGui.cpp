@@ -581,7 +581,6 @@ int main(int argc, char* argv[]) {
         static bool        loaded             = false;
         static bool        loading            = false;
         static std::string loadError          = "";
-        static int         mode               = 0;
         static std::string outputName         = "test.exr";
         static std::string outputPath         = "test.exr";
         static int         resolution         = 512;
@@ -746,30 +745,6 @@ int main(int argc, char* argv[]) {
                     available.elevationMin,
                     available.elevationMax);
             helpMarker(label);
-            if (ImGui::BeginCombo("mode", modes[mode])) {
-                for (int n = 0; n < IM_ARRAYSIZE(modes); n++) {
-                    // Disable polarisation mode if not available in the loaded dataset.
-                    ImGuiSelectableFlags flags = ImGuiSelectableFlags_None;
-                    if (!available.polarisation && n == 2) {
-                        flags |= ImGuiSelectableFlags_Disabled;
-                    }
-
-                    const bool is_selected = (mode == n);
-                    if (ImGui::Selectable(modes[n], is_selected, flags)) {
-                        mode = n;
-                    }
-
-                    // Set the initial focus when opening the combo (scrolling + keyboard navigation focus).
-                    if (is_selected) {
-                        ImGui::SetItemDefaultFocus();
-                    }
-                }
-                ImGui::EndCombo();
-                if (autorender)
-                    rendering = true;
-            }
-            ImGui::SameLine();
-            helpMarker("Rendered quantity");
             if (ImGui::DragInt("resolution",
                                &resolution,
                                1,
@@ -811,7 +786,6 @@ int main(int argc, char* argv[]) {
                            altitude,
                            azimuth,
                            elevation,
-                           Mode(mode),
                            resolution,
                            View(view),
                            visibility,
