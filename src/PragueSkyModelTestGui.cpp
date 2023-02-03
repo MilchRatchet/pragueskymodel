@@ -423,17 +423,22 @@ int main(int argc, char* argv[]) {
     available.channelWidth  = SPECTRUM_STEP;
 
     // The full window and the input subwindow dimensions.
-    const int windowWidthFull  = 1200;
-    const int windowHeightFull = 800;
 #ifdef _WIN32
     const int         windowWidthInput  = 440;
-    const int         windowHeightInput = 760;
+    const int         windowHeightInput = 1080;
     const std::string dirSeparator      = "\\";
+    const int         windowWidthImage  = 1080;
+    const int         windowHeightImage = 1080;
 #else
     const int         windowWidthInput  = 440;
     const int         windowHeightInput = 800;
     const std::string dirSeparator      = "/";
+    const int         windowWidthImage  = 1080;
+    const int         windowHeightImage = 1080;
 #endif
+
+    const int windowWidthFull  = windowWidthInput + windowWidthImage;
+    const int windowHeightFull = std::max(windowHeightInput, windowHeightImage);
 
 #ifdef _WIN32
     // Create application window
@@ -583,7 +588,7 @@ int main(int argc, char* argv[]) {
         static std::string loadError          = "";
         static std::string outputName         = "test.exr";
         static std::string outputPath         = "test.exr";
-        static int         resolution         = 512;
+        static int         resolution         = 520;
         static int         renderedResolution = resolution;
         static bool        rendered           = false;
         static bool        rendering          = false;
@@ -597,7 +602,7 @@ int main(int argc, char* argv[]) {
         static float       visibility         = 59.4f;
         static int         visibilityToLoad   = 0;
         static int         wavelength         = 280;
-        static float       zoom               = 1.f;
+        static float       zoom               = 2.0f;
 
         // Input window
         {
@@ -966,11 +971,7 @@ int main(int argc, char* argv[]) {
         // Output window
         {
             ImGui::SetNextWindowPos(ImVec2(windowWidthInput, 0));
-#ifdef _WIN32
-            ImGui::SetNextWindowSize(ImVec2(windowWidthFull - windowWidthInput - 17, windowHeightInput));
-#else
-            ImGui::SetNextWindowSize(ImVec2(windowWidthFull - windowWidthInput, windowHeightInput));
-#endif
+            ImGui::SetNextWindowSize(ImVec2(windowWidthImage, windowHeightImage));
             ImGui::Begin("Output", NULL, outputWindowFlags);
 
             // Update the texture if needed
