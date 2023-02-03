@@ -293,6 +293,7 @@ int main(int argc, char* argv[]) {
     std::vector<std::vector<float>> result;
     void*                           texture = NULL;
     const char* modes[] = { "Sky radiance", "Sun radiance", "Polarisation", "Transmittance" };
+    const char* tonemaps[] = { "None", "ACES", "Reinhard", "Uncharted2" };
     const char* views[] = { "Up-facing fisheye", "Side-facing fisheye" };
     char        label[150];
     const char*        visibilitiesToLoad[] = { "Everything",
@@ -487,6 +488,7 @@ int main(int argc, char* argv[]) {
         static long long   renderTime         = 0;
         static bool        saved              = false;
         static std::string saveError          = "";
+        static int         tonemapper         = 0;
         static bool        updateTexture      = false;
         static int         view               = 0;
         static float       visibility         = 59.4f;
@@ -756,6 +758,23 @@ int main(int argc, char* argv[]) {
             ImGui::Text("Display:");
 
             // Parameters
+            if (ImGui::BeginCombo("tonemap", tonemaps[tonemapper])) {
+                for (int i = 0; i < IM_ARRAYSIZE(tonemaps); i++) {
+                    const bool is_selected = (tonemapper == i);
+                    if (ImGui::Selectable(tonemaps[i], is_selected)) {
+                        tonemapper = i;
+                        updateTexture = true;
+                    }
+
+                    // Set the initial focus when opening the combo (scrolling + keyboard navigation focus).
+                    if (is_selected) {
+                        ImGui::SetItemDefaultFocus();
+                    }
+                }
+                ImGui::EndCombo();
+            }
+            ImGui::SameLine();
+            helpMarker("Tonemapping function applied to displayed image");
             if (ImGui::SliderFloat("exposure", &exposure, -25.0f, 25.0f, "%.1f")) {
                 updateTexture = true;
             }
