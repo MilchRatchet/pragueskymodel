@@ -156,6 +156,91 @@ LRESULT WINAPI WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 }
 #endif
 
+static void tonemapACES(float& r, float& g, float& b) {
+    float cr = 0.59719f * r + 0.35458f * g + 0.04823f * b;
+    float cg = 0.07600f * r + 0.90834f * g + 0.01566f * b;
+    float cb = 0.02840f * r + 0.13383f * g + 0.83777f * b;
+
+    float ar = cr + 0.0245786f;
+    float ag = cg + 0.0245786f;
+    float ab = cb + 0.0245786f;
+    ar = ar * cr;
+    ag = ag * cg;
+    ab = ab * cb;
+    ar = ar - 0.000090537f;
+    ag = ag - 0.000090537f;
+    ab = ab - 0.000090537f;
+
+    float br = cr * 0.983729f;
+    float bg = cg * 0.983729f;
+    float bb = cb * 0.983729f;
+    br = br + 0.432951f;
+    bg = bg + 0.432951f;
+    bb = bb + 0.432951f;
+    br = br * cr;
+    bg = bg * cg;
+    bb = bb * cb;
+    br = br + 0.238081f;
+    bg = bg + 0.238081f;
+    bb = bb + 0.238081f;
+    br = 1.0f / br;
+    bg = 1.0f / bg;
+    bb = 1.0f / bb;
+
+    cr = ar * br;
+    cg = ag * bg;
+    cb = ab * bb;
+
+    r = 1.60475f * cr - 0.53108f * cg - 0.07367f * cb;
+    g = -0.10208f * cr + 1.10813f * cg - 0.00605f * cb;
+    b = -0.00327f * cr - 0.07276f * cg + 1.07602f * cb;
+}
+
+static void tonemapReinhard(float& r, float& g, float& b) {
+    const float f = 1.0f / (1.0f + 0.2126f * r + 0.7152f * g + 0.0722f * b);
+    r *= f;
+    g *= f;
+    b *= f;
+}
+
+static void tonemapUncharted2_helper(float& r, float& g, float& b) {
+    const float a = 0.15f;
+    const float b2 = 0.50f;
+    const float c = 0.10f;
+    const float d = 0.20f;
+    const float e = 0.02f;
+    const float f = 0.30f;
+
+    const float pr = ((r * (a * r + c * b2) + d * e) / (r * (a * r + b2) + d * f)) - e / f;
+    const float pg = ((g * (a * g + c * b2) + d * e) / (g * (a * g + b2) + d * f)) - e / f;
+    const float pb = ((b * (a * b + c * b2) + d * e) / (b * (a * b + b2) + d * f)) - e / f;
+
+    r = pr;
+    g = pg;
+    b = pb;
+}
+
+static void tonemapUncharted2(float& r, float& g, float& b) {
+    r *= 2.0f;
+    g *= 2.0f;
+    b *= 2.0f;
+
+    tonemapUncharted2_helper(r, g, b);
+
+    float sr = 11.2f;
+    float sg = 11.2f;
+    float sb = 11.2f;
+    tonemapUncharted2_helper(sr, sg, sb);
+
+    sr = 1.0f / sr;
+    sg = 1.0f / sg;
+    sb = 1.0f / sb;
+
+    r *= sr;
+    g *= sg;
+    b *= sb;
+}
+
 static float linearRGB_to_sRGB(const float value) {
     /*
      * Original: std:pow(value, 1.0f / 2.2f);
@@ -170,11 +255,14 @@ static float linearRGB_to_sRGB(const float value) {
 }
 
 // src is 3 values but dst is 4, don't ask, I don't make the rules
-static void colorFloatTo8Bit(const float* src, uint8_t* dst, const float exposure) {
+static void colorFloatTo8Bit(const float* src, uint8_t* dst, const float exposure, void (*tonemapFunc)(float&,float&,float&)) {
     float r = src[0] * exposure;
     float g = src[1] * exposure;
     float b = src[2] * exposure;
 
+    if (tonemapFunc) {
+        tonemapFunc(r,g,b);
+    }
 
     r = linearRGB_to_sRGB(r);
     g = linearRGB_to_sRGB(g);
@@ -189,14 +277,30 @@ static void colorFloatTo8Bit(const float* src, uint8_t* dst, const float exposur
 void convertToTexture(const std::vector<float>& image,
                       const int                 resolution,
                       const float               exposure,
+                      const int                 tonemapChoice,
                       void**                    texture) {
     // Apply exposure and convert float RGB to byte RGBA
+    void (*tonemapFunc)(float&,float&,float&);
+    switch (tonemapChoice) {
+        case 1:
+            tonemapFunc = tonemapACES;
+            break;
+        case 2:
+            tonemapFunc = tonemapReinhard;
+            break;
+        case 3:
+            tonemapFunc = tonemapUncharted2;
+            break;
+        default:
+            tonemapFunc = 0;
+            break;
+    }
     std::vector<uint8_t> rawData;
     rawData.resize(size_t(resolution) * resolution * 4);
     const float expMult = std::pow(2.f, exposure);
     for (int x = 0; x < resolution; x++) {
         for (int y = 0; y < resolution; y++) {
-            colorFloatTo8Bit(&image[(size_t(x) * resolution + y) * 3], &rawData[(size_t(x) * resolution + y) * 4], expMult);
+            colorFloatTo8Bit(&image[(size_t(x) * resolution + y) * 3], &rawData[(size_t(x) * resolution + y) * 4], expMult, tonemapFunc);
         }
     }
 
@@ -897,7 +1001,7 @@ int main(int argc, char* argv[]) {
 
             // Update the texture if needed
             if (updateTexture) {
-                convertToTexture(result[0], renderedResolution, exposure, &texture);
+                convertToTexture(result[0], renderedResolution, exposure, tonemapper, &texture);
             }
 
             // Display the texture in the center of the window
