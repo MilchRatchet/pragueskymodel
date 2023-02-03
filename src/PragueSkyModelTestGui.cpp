@@ -572,7 +572,7 @@ int main(int argc, char* argv[]) {
         static float       albedo             = 0.5f;
         static float       altitude           = 0.0f;
         static bool        autorender         = false;
-        static float       azimuth            = 0.0f;
+        static float       azimuth            = 0.5f * 3.14159265359f;
         static int         channelMode        = 0;
         static std::string datasetName        = "PragueSkyModelDatasetGround.dat";
         static std::string datasetPath        = "PragueSkyModelDatasetGround.dat";
@@ -584,7 +584,7 @@ int main(int argc, char* argv[]) {
         static int         mode               = 0;
         static std::string outputName         = "test.exr";
         static std::string outputPath         = "test.exr";
-        static int         resolution         = 128;
+        static int         resolution         = 512;
         static int         renderedResolution = resolution;
         static bool        rendered           = false;
         static bool        rendering          = false;
@@ -594,7 +594,7 @@ int main(int argc, char* argv[]) {
         static std::string saveError          = "";
         static int         tonemapper         = 0;
         static bool        updateTexture      = false;
-        static int         view               = 0;
+        static int         view               = 1;
         static float       visibility         = 59.4f;
         static int         visibilityToLoad   = 0;
         static int         wavelength         = 280;
