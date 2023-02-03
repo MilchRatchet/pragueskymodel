@@ -581,6 +581,8 @@ int main(int argc, char* argv[]) {
         static int         channelMode        = 0;
         static std::string datasetName        = "PragueSkyModelDatasetGround.dat";
         static std::string datasetPath        = "PragueSkyModelDatasetGround.dat";
+        static bool        displayError       = false;
+        static bool        displayPathTrace   = false;
         static float       elevation          = 0.0f;
         static float       exposure           = 0.f;
         static bool        loaded             = false;
@@ -866,7 +868,22 @@ int main(int argc, char* argv[]) {
             ImGui::SliderFloat("zoom", &zoom, 0.1f, 10.0f, "%.1fx");
             ImGui::SameLine();
             helpMarker("Multiplication factor of displayed image size");
-
+            if (displayError) {
+                ImGui::BeginDisabled();
+            }
+            if (ImGui::Checkbox("path traced result", &displayPathTrace)) {
+                updateTexture = true;
+            }
+            ImGui::SameLine();
+            helpMarker("Toggle between reference and path tracer");
+            if (displayError) {
+                ImGui::EndDisabled();
+            }
+            if (ImGui::Checkbox("show error", &displayError)) {
+                updateTexture = true;
+            }
+            ImGui::SameLine();
+            helpMarker("Error between reference and path tracer");
             // Display section end
             ImGui::Dummy(ImVec2(0.0f, 1.0f));
             ImGui::Separator();
@@ -976,7 +993,15 @@ int main(int argc, char* argv[]) {
 
             // Update the texture if needed
             if (updateTexture) {
-                convertToTexture(result[0], renderedResolution, exposure, tonemapper, &texture);
+                if (displayError) {
+
+                } else {
+                    if (displayPathTrace) {
+
+                    } else {
+                        convertToTexture(result[0], renderedResolution, exposure, tonemapper, &texture);
+                    }
+                }
             }
 
             // Display the texture in the center of the window
