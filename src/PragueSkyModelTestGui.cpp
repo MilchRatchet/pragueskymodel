@@ -16,7 +16,7 @@
 #pragma warning(pop)
 
 // For using the sky model.
-#include "PragueSkyModelTest.h"
+#include "PragueSkyModelTest.hpp"
 
 // For GUI.
 #include <chrono>

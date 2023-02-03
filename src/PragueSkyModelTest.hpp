@@ -9,7 +9,7 @@
 #define _USE_MATH_DEFINES
 #include <math.h>
 
-#include "PragueSkyModel.h"
+#include "PragueSkyModel.hpp"
 
 
 using Vector3  = PragueSkyModel::Vector3;

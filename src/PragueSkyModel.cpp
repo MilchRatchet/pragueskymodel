@@ -8,7 +8,7 @@
 #include <cstring>
 #include <tuple>
 
-#include "PragueSkyModel.h"
+#include "PragueSkyModel.hpp"
 
 /////////////////////////////////////////////////////////////////////////////////////
 // Constants
