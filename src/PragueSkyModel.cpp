@@ -6,6 +6,7 @@
 #include <cassert>
 #include <limits>
 #include <cstring>
+#include <tuple>
 
 #include "PragueSkyModel.h"
 
@@ -322,10 +323,10 @@ void PragueSkyModel::readRadiance(FILE* handle, const double singleVisibility) {
     // albedoCount          (1 * int), albedos                  (albedoCount * double),
     // altitudeCount        (1 * int), altitudes              (altitudeCount * double),
     // elevationCount       (1 * int), elevations            (elevationCount * double),
-    // channels             (1 * int), channelStart                       (1 * double), channelWidth (1 * double), 
-    // rankRad              (1 * int), 
-    // sunBreaksCountRad    (1 * int), sunBreaksRad       (sunBreaksCountRad * double), 
-    // zenithBreaksCountRad (1 * int), zenithBreaksRad (zenithBreaksCountRad * double), 
+    // channels             (1 * int), channelStart                       (1 * double), channelWidth (1 * double),
+    // rankRad              (1 * int),
+    // sunBreaksCountRad    (1 * int), sunBreaksRad       (sunBreaksCountRad * double),
+    // zenithBreaksCountRad (1 * int), zenithBreaksRad (zenithBreaksCountRad * double),
     // emphBreaksCountRad   (1 * int), emphBreaksRad     (emphBreaksCountRad * double)
 
     size_t valsRead;
@@ -367,7 +368,7 @@ void PragueSkyModel::readRadiance(FILE* handle, const double singleVisibility) {
             visibilitiesRad[0] = visibilitiesRadInFile[visIdx - 1];
             visibilitiesRad[1] = visibilitiesRadInFile[visIdx];
             skippedVisibilities = visIdx - 1;
-        }        
+        }
     }
 
     int albedoCount = 0;
@@ -472,8 +473,8 @@ void PragueSkyModel::readRadiance(FILE* handle, const double singleVisibility) {
     // Read data.
 
     // Structure of the data part of the data file:
-    // [[[[[[ sunCoefsRad       (sunBreaksCountRad * half), zenithScale (1 * double), 
-    //        zenithCoefsRad (zenithBreaksCountRad * half) ] * rankRad, 
+    // [[[[[[ sunCoefsRad       (sunBreaksCountRad * half), zenithScale (1 * double),
+    //        zenithCoefsRad (zenithBreaksCountRad * half) ] * rankRad,
     //        emphCoefsRad     (emphBreaksCountRad * half) ]
     //  * channels ] * elevationCount ] * altitudeCount ] * albedoCount ] * visibilityCount
 
@@ -604,9 +605,9 @@ void PragueSkyModel::readPolarisation(FILE* handle) {
     // Read metadata.
 
     // Structure of the metadata part of the data file:
-    // rankPol              (1 * int), 
+    // rankPol              (1 * int),
     // sunBreaksCountPol    (1 * int), sunBreaksPol    (sunBreaksCountPol * double),
-    // zenithBreaksCountPol (1 * int), zenithBreaksPol (zenithBreaksCountPol * double), 
+    // zenithBreaksCountPol (1 * int), zenithBreaksPol (zenithBreaksCountPol * double),
 
     size_t valsRead;
 
@@ -657,8 +658,8 @@ void PragueSkyModel::readPolarisation(FILE* handle) {
     // Read data.
 
     // Structure of the data part of the data file:
-    // [[[[[[ sunCoefsPol       (sunBreaksCountPol * float), 
-    //        zenithCoefsPol (zenithBreaksCountPol * float) ] * rankPol] 
+    // [[[[[[ sunCoefsPol       (sunBreaksCountPol * float),
+    //        zenithCoefsPol (zenithBreaksCountPol * float) ] * rankPol]
     // * channels ] * elevationCount ] * altitudeCount ] * albedoCount ] * visibilityCount
 
     size_t offset = 0;

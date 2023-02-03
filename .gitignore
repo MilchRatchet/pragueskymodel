@@ -1,11 +1,13 @@
 /.vs
 /x64
+/.vscode
 *.exr
 *.dat
 *.sln
 *.vcxproj
 *.filters
 *.user
+*.bat
 .clang-format
 imgui.ini
 build

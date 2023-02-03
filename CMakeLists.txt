@@ -5,7 +5,7 @@
 
 cmake_minimum_required(VERSION 3.1)
 
-set(CMAKE_C_STANDARD 99)
+set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS OFF)
 
@@ -35,6 +35,8 @@ target_include_directories(PragueSkyModelCli PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
 # GUI version
 
 find_library(D3D11_LIBRARY d3d11.lib)
+find_library(D3DCOMPILER_LIBRARY d3dcompiler.lib)
+find_library(DWMAPI Dwmapi.lib)
 
 set(PRAGUESKYMODELGUI_SRC
     thirdparty/miniz/miniz.c
@@ -57,6 +59,8 @@ target_include_directories(PragueSkyModelGui PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
 target_include_directories(PragueSkyModelGui PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/tinyexr)
 
 target_link_libraries(PragueSkyModelGui PRIVATE d3d11.lib)
+target_link_libraries(PragueSkyModelGui PRIVATE d3dcompiler.lib)
+target_link_libraries(PragueSkyModelGui PRIVATE Dwmapi.lib)
 
 # Linux
 else()
