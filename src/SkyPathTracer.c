@@ -35,8 +35,8 @@
 #define SKY_MIE_EXTINCTION scale_color(SKY_MIE_SCATTERING, 1.11f)
 #define SKY_OZONE_EXTINCTION get_color(0.65f * 0.001f, 1.881f * 0.001f, 0.085f * 0.001f)
 
-#define SKY_RAYLEIGH_DISTRIBUTION 0.125f
-#define SKY_MIE_DISTRIBUTION 0.833f
+#define SKY_RAYLEIGH_DISTRIBUTION (1.0f / 8.0f)
+#define SKY_MIE_DISTRIBUTION (1.0f / 1.2f)
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
 //  Math Helper Section
@@ -329,6 +329,10 @@ __device__ float sample_sphere_solid_angle(const vec3 p, const float r, const ve
   return 2.0f * PI * a * a;
 }
 
+__device__ float cornette_shanks(const float cos_angle, const float g) {
+	return (3.0f * (1.0f - g * g) * (1.0f + cos_angle * cos_angle)) / (4.0f * PI * 2.0f * (2.0f + g * g) * pow(1.0f + g * g - 2.0f * g * cos_angle, 3.0f/2.0f));
+}
+
 __device__ float henvey_greenstein(const float cos_angle, const float g) {
   return (1.0f - g * g) / (4.0f * PI * powf(1.0f + g * g - 2.0f * g * cos_angle, 1.5f));
 }
@@ -351,6 +355,14 @@ static skyInternalParams INT_PARAMS;
 
 __device__ float sky_rayleigh_phase(const float cos_angle) {
   return 3.0f * (1.0f + cos_angle * cos_angle) / (16.0f * 3.1415926535f);
+}
+
+__device__ float sky_mie_phase(const float cos_angle) {
+  if (PARAMS.use_cs_mie) {
+    return cornette_shanks(cos_angle, PARAMS.mie_g);
+  } else {
+    return henvey_greenstein(cos_angle, PARAMS.mie_g);
+  }
 }
 
 __device__ float sky_density_falloff(const float height, const float density_falloff) {
@@ -480,7 +492,7 @@ __device__ RGBF sky_compute_atmosphere(const vec3 origin, const vec3 ray, const 
       const float cos_angle = fmaxf(0.0f, dot_product(ray, ray_scatter));
 
       const float phase_rayleigh = sky_rayleigh_phase(cos_angle);
-      const float phase_mie      = henvey_greenstein(cos_angle, 0.8f);
+      const float phase_mie      = sky_mie_phase(cos_angle);
 
       // Amount of light that reached pos
       RGBF S = scale_color(INT_PARAMS.sun_color, PARAMS.sun_strength);
@@ -590,7 +602,7 @@ void renderPathTracer(  const skyPathTracerParams        model,
   PARAMS = model;
 
   {
-    INT_PARAMS.sun_color = get_color(1.0f, 1.0f, 1.0f);
+    INT_PARAMS.sun_color = get_color(1.474f, 1.8504f, 1.91198f);
 
     vec3 sun_pos = angles_to_direction(elevation, azimuth);
     sun_pos = normalize_vector(sun_pos);

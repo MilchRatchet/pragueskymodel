@@ -11,6 +11,8 @@ struct skyPathTracerParams {
     float base_density;
     float sun_strength;
     int steps;
+    int use_cs_mie;
+    float mie_g;
 } typedef skyPathTracerParams;
 
 void renderPathTracer(  const skyPathTracerParams        model,

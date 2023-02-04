@@ -610,10 +610,12 @@ int main(int argc, char* argv[]) {
         static float       zoom               = 2.0f;
         static skyPathTracerParams ptParams   = {
                 1, /* OZONE_ABSORPTION */
-                16, /* SHADOW_STEPS */
+                8, /* SHADOW_STEPS */
                 1.0f, /* BASE_DENSITY */
-                10000.0f, /* SUN_STRENGTH */
-                8 /* STEPS */
+                100000.0f, /* SUN_STRENGTH */
+                16, /* STEPS */
+                0, /* USE CS MIE */
+                0.8 /* MIE G */
         };
 
         // Input window
@@ -883,6 +885,8 @@ int main(int argc, char* argv[]) {
                                10000,
                                "%d",
                                ImGuiSliderFlags_AlwaysClamp);
+            ImGui::Checkbox("use cs mie phase", (bool*)&ptParams.use_cs_mie);
+            ImGui::SliderFloat("mie g", &ptParams.mie_g, -1.0f, 1.0f, "%.3f");
 
 
             ImGui::Dummy(ImVec2(0.0f, 1.0f));
