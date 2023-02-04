@@ -398,9 +398,9 @@ __device__ RGBF sky_extinction(const vec3 origin, const vec3 ray, const float st
     const vec3 pos = add_vector(origin, scale_vector(ray, reach));
 
     const float height           = sky_height(pos);
-    const float density_rayleigh = sky_density_falloff(height, SKY_RAYLEIGH_DISTRIBUTION);
-    const float density_mie      = sky_density_falloff(height, SKY_MIE_DISTRIBUTION);
-    const float density_ozone    = sky_ozone_density(height);
+    const float density_rayleigh = sky_density_falloff(height, 1.0f / PARAMS.rayleigh_height_falloff) * PARAMS.density_rayleigh;
+    const float density_mie      = sky_density_falloff(height, 1.0f / PARAMS.mie_height_falloff) * PARAMS.density_mie;
+    const float density_ozone    = sky_ozone_density(height) * PARAMS.density_ozone;
 
     RGBF D = scale_color(SKY_RAYLEIGH_EXTINCTION, density_rayleigh);
     D      = add_color(D, scale_color(SKY_MIE_EXTINCTION, density_mie));
@@ -411,7 +411,7 @@ __device__ RGBF sky_extinction(const vec3 origin, const vec3 ray, const float st
     reach += step_size;
   }
 
-  density = scale_color(density, -PARAMS.base_density * 0.5f * step_size);
+  density = scale_color(density, -PARAMS.base_density * step_size);
 
   return get_color(expf(density.r), expf(density.g), expf(density.b));
 }
@@ -485,9 +485,9 @@ __device__ RGBF sky_compute_atmosphere(const vec3 origin, const vec3 ray, const 
       // This is not very beautiful but it seems to be the easiest approach
       const RGBF extinction_sun = sky_extinction(pos, ray_scatter, 0.0f, scatter_distance);
 
-      const float density_rayleigh = sky_density_falloff(height, SKY_RAYLEIGH_DISTRIBUTION);
-      const float density_mie      = sky_density_falloff(height, SKY_MIE_DISTRIBUTION);
-      const float density_ozone    = sky_ozone_density(height);
+      const float density_rayleigh = sky_density_falloff(height, 1.0f / PARAMS.rayleigh_height_falloff) * PARAMS.density_rayleigh;
+      const float density_mie      = sky_density_falloff(height, 1.0f / PARAMS.mie_height_falloff) * PARAMS.density_mie;
+      const float density_ozone    = sky_ozone_density(height) * PARAMS.density_ozone;
 
       const float cos_angle = fmaxf(0.0f, dot_product(ray, ray_scatter));
 
@@ -501,14 +501,14 @@ __device__ RGBF sky_compute_atmosphere(const vec3 origin, const vec3 ray, const 
       // Amount of light that gets scattered towards camera at pos
       RGBF scattering = scale_color(SKY_RAYLEIGH_SCATTERING, density_rayleigh * phase_rayleigh);
       scattering      = add_color(scattering, scale_color(SKY_MIE_SCATTERING, density_mie * phase_mie));
-      scattering      = scale_color(scattering, PARAMS.base_density * 0.5f * light_angle);
+      scattering      = scale_color(scattering, PARAMS.base_density * light_angle);
 
       S = mul_color(S, scattering);
 
       RGBF extinction = scale_color(SKY_RAYLEIGH_EXTINCTION, density_rayleigh);
       extinction      = add_color(extinction, scale_color(SKY_MIE_EXTINCTION, density_mie));
       extinction      = add_color(extinction, scale_color(SKY_OZONE_EXTINCTION, density_ozone));
-      extinction      = scale_color(extinction, PARAMS.base_density * 0.5f);
+      extinction      = scale_color(extinction, PARAMS.base_density);
 
       // Amount of light that gets lost along this step
       RGBF step_transmittance;

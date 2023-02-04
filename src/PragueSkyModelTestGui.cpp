@@ -612,10 +612,15 @@ int main(int argc, char* argv[]) {
                 1, /* OZONE_ABSORPTION */
                 8, /* SHADOW_STEPS */
                 1.0f, /* BASE_DENSITY */
-                100000.0f, /* SUN_STRENGTH */
+                1000000.0f, /* SUN_STRENGTH */
                 16, /* STEPS */
                 0, /* USE CS MIE */
-                0.8 /* MIE G */
+                0.8f, /* MIE G */
+                1.0f, /* Rayleigh Density*/
+                1.0f, /* Mie Density*/
+                1.0f, /* Ozone Density*/
+                8.0f, /* Rayleigh Falloff */
+                1.2f  /* Mie Falloff */
         };
 
         // Input window
@@ -867,7 +872,7 @@ int main(int argc, char* argv[]) {
             ImGui::SliderFloat("density", &ptParams.base_density, 0.0f, 10.0f, "%.1f");
             ImGui::SameLine();
             helpMarker("Density of the atmosphere");
-            ImGui::SliderFloat("sun intensity", &ptParams.sun_strength, 0.0f, 1000000.0f, "%.1f");
+            ImGui::SliderFloat("sun intensity", &ptParams.sun_strength, 0.0f, 2000000.0f, "%.1f");
             ImGui::SameLine();
             helpMarker("Intensity of sun");
             ImGui::Checkbox("ozone absorption", (bool*)&ptParams.ozone_absorption);
@@ -887,6 +892,11 @@ int main(int argc, char* argv[]) {
                                ImGuiSliderFlags_AlwaysClamp);
             ImGui::Checkbox("use cs mie phase", (bool*)&ptParams.use_cs_mie);
             ImGui::SliderFloat("mie g", &ptParams.mie_g, -1.0f, 1.0f, "%.3f");
+            ImGui::SliderFloat("density rayleigh", &ptParams.density_rayleigh, 0.0f, 10.0f, "%.3f");
+            ImGui::SliderFloat("density mie", &ptParams.density_mie, 0.0f, 10.0f, "%.3f");
+            ImGui::SliderFloat("density ozone", &ptParams.density_ozone, 0.0f, 10.0f, "%.3f");
+            ImGui::SliderFloat("height falloff rayleigh", &ptParams.rayleigh_height_falloff, 0.1f, 20.0f, "%.3f");
+            ImGui::SliderFloat("height falloff mie", &ptParams.mie_height_falloff, 0.1f, 20.0f, "%.3f");
 
 
             ImGui::Dummy(ImVec2(0.0f, 1.0f));

@@ -13,6 +13,11 @@ struct skyPathTracerParams {
     int steps;
     int use_cs_mie;
     float mie_g;
+    float density_rayleigh;
+    float density_mie;
+    float density_ozone;
+    float rayleigh_height_falloff;
+    float mie_height_falloff;
 } typedef skyPathTracerParams;
 
 void renderPathTracer(  const skyPathTracerParams        model,
