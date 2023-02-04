@@ -18,6 +18,10 @@ struct skyPathTracerParams {
     float density_ozone;
     float rayleigh_height_falloff;
     float mie_height_falloff;
+    float wavelength_red;
+    float wavelength_green;
+    float wavelength_blue;
+    float carbondioxide_percent;
 } typedef skyPathTracerParams;
 
 void renderPathTracer(  const skyPathTracerParams        model,

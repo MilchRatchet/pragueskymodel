@@ -576,7 +576,7 @@ int main(int argc, char* argv[]) {
         ImGui::NewFrame();
 
         // All values modified by the GUI
-        static float       albedo             = 0.5f;
+        static float       albedo             = 0.0f;
         static float       altitude           = 0.0f;
         static bool        autorender         = false;
         static float       azimuth            = 0.5f * 3.14159265359f;
@@ -620,7 +620,11 @@ int main(int argc, char* argv[]) {
                 1.0f, /* Mie Density*/
                 1.0f, /* Ozone Density*/
                 8.0f, /* Rayleigh Falloff */
-                1.2f  /* Mie Falloff */
+                1.2f, /* Mie Falloff */
+                680.0f, /* Wavelength Red */
+                550.0f, /* Wavelength Green */
+                440.0f, /* Wavelength Blue */
+                0.03f /* Carbondioxide Percent */
         };
 
         // Input window
@@ -897,6 +901,10 @@ int main(int argc, char* argv[]) {
             ImGui::SliderFloat("density ozone", &ptParams.density_ozone, 0.0f, 10.0f, "%.3f");
             ImGui::SliderFloat("height falloff rayleigh", &ptParams.rayleigh_height_falloff, 0.1f, 20.0f, "%.3f");
             ImGui::SliderFloat("height falloff mie", &ptParams.mie_height_falloff, 0.1f, 20.0f, "%.3f");
+            ImGui::SliderFloat("wavelength red", &ptParams.wavelength_red, 380.0f, 750.0f, "%.1f");
+            ImGui::SliderFloat("wavelength green", &ptParams.wavelength_green, 380.0f, 750.0f, "%.1f");
+            ImGui::SliderFloat("wavelength blue", &ptParams.wavelength_blue, 380.0f, 750.0f, "%.1f");
+            ImGui::SliderFloat("CO2 percentage", &ptParams.carbondioxide_percent, 0.0f, 1.0f, "%.3f");
 
 
             ImGui::Dummy(ImVec2(0.0f, 1.0f));

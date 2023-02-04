@@ -27,7 +27,8 @@
 #define SKY_ATMO_HEIGHT 100.0f
 #define SKY_ATMO_RADIUS SKY_ATMO_HEIGHT + SKY_EARTH_RADIUS
 
-#define SKY_RAYLEIGH_SCATTERING get_color(5.8f * 0.001f, 13.558f * 0.001f, 33.1f * 0.001f)
+//#define SKY_RAYLEIGH_SCATTERING get_color(5.8f * 0.001f, 13.558f * 0.001f, 33.1f * 0.001f)
+#define SKY_RAYLEIGH_SCATTERING INT_PARAMS.rayleigh_scattering
 #define SKY_MIE_SCATTERING get_color(3.996f * 0.001f, 3.996f * 0.001f, 3.996f * 0.001f)
 #define SKY_OZONE_SCATTERING 0.0f
 
@@ -344,6 +345,7 @@ __device__ float henvey_greenstein(const float cos_angle, const float g) {
 struct skyInternalParams {
   RGBF sun_color;
   vec3 sun_pos;
+  RGBF rayleigh_scattering;
 } typedef skyInternalParams;
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -367,6 +369,26 @@ __device__ float sky_mie_phase(const float cos_angle) {
 
 __device__ float sky_density_falloff(const float height, const float density_falloff) {
   return expf(-height * density_falloff);
+}
+
+__device__ float sky_aerosol_density(const float height) {
+  // INSO (insoluble = dust-like particles)
+  float INSO = expf(-height * (1.0f / 1.7f));
+  /*if (height < 2.0f) {
+    INSO = expf(-height * (1.0f / 8.0f));
+  } else if (height < 12.0f) {
+    INSO = 0.3f * expf(-height * (1.0f / 8.0f));
+  }*/
+
+  // WASO (water soluble = biogenic particles, organic carbon)
+  float WASO = 0.0f;
+  if (height < 2.0f) {
+    WASO = 1.0f + 0.125f * (2.0f - height);
+  } else if (height < 3.0f) {
+    WASO = 3.0f - height;
+  }
+
+  return INSO + WASO;
 }
 
 __device__ float sky_ozone_density(const float height) {
@@ -399,7 +421,8 @@ __device__ RGBF sky_extinction(const vec3 origin, const vec3 ray, const float st
 
     const float height           = sky_height(pos);
     const float density_rayleigh = sky_density_falloff(height, 1.0f / PARAMS.rayleigh_height_falloff) * PARAMS.density_rayleigh;
-    const float density_mie      = sky_density_falloff(height, 1.0f / PARAMS.mie_height_falloff) * PARAMS.density_mie;
+    //const float density_mie      = sky_density_falloff(height, 1.0f / PARAMS.mie_height_falloff) * PARAMS.density_mie;
+    const float density_mie      = sky_aerosol_density(height) * PARAMS.density_mie;
     const float density_ozone    = sky_ozone_density(height) * PARAMS.density_ozone;
 
     RGBF D = scale_color(SKY_RAYLEIGH_EXTINCTION, density_rayleigh);
@@ -486,7 +509,8 @@ __device__ RGBF sky_compute_atmosphere(const vec3 origin, const vec3 ray, const 
       const RGBF extinction_sun = sky_extinction(pos, ray_scatter, 0.0f, scatter_distance);
 
       const float density_rayleigh = sky_density_falloff(height, 1.0f / PARAMS.rayleigh_height_falloff) * PARAMS.density_rayleigh;
-      const float density_mie      = sky_density_falloff(height, 1.0f / PARAMS.mie_height_falloff) * PARAMS.density_mie;
+      //const float density_mie      = sky_density_falloff(height, 1.0f / PARAMS.mie_height_falloff) * PARAMS.density_mie;
+      const float density_mie      = sky_aerosol_density(height) * PARAMS.density_mie;
       const float density_ozone    = sky_ozone_density(height) * PARAMS.density_ozone;
 
       const float cos_angle = fmaxf(0.0f, dot_product(ray, ray_scatter));
@@ -579,6 +603,42 @@ static vec3 pixelToDirection(int x, int y, int resolution, int view) {
     }
 }
 
+// Wavelength in 1nm
+static float computeRayleighScattering(const float wavelength) {
+  const double N = 2.546899 * 1e25;
+
+  const double index = 1.000293;
+
+  // wavelength in 1 meter
+  const double lambda = ((double) wavelength) * 1e-9;
+
+#if 0
+  const double depolarisation = 0.035;
+  const double F_air = (6.0 + 3.0 * depolarisation) / (6.0 - 7.0 * depolarisation);
+#else
+  // This formula needs wavelength to be in 1 micrometre
+  const double lambda2 = lambda * 1e6 * lambda * 1e6;
+  const double lambda4 = lambda2 * lambda2;
+
+  // Bodhaine1999 (equation 23)
+  const double F_argon = 1.0;
+  const double F_carbondiox = 1.15;
+  const double F_nitrogen = 1.024 + 3.17 * 1e-4 / lambda4;
+  const double F_oxygen = 1.096 + 1.385 * 1e-3 / lambda2 + 1.448 * 1e-4 / lambda4;
+  const double C_carbondiox = PARAMS.carbondioxide_percent;
+
+  const double F_air = (78.084 * F_nitrogen + 20.946 * F_oxygen + 0.934 * F_argon + C_carbondiox * F_carbondiox)
+                      / (78.084 + 20.946 + 0.934 + C_carbondiox);
+#endif
+
+  // Bodhaine1999 (equation 2)
+  // Note the formula in the paper is per molecule
+  const double scattering = (24.0 * PI * PI * PI * (index * index - 1.0) * (index * index - 1.0))
+                          / (N * lambda * lambda * lambda * lambda * (index * index + 2.0) * (index * index + 2.0));
+
+  return (float) (scattering * F_air * 1e3);
+}
+
 void renderPathTracer(  const skyPathTracerParams        model,
                         const double                     albedo,
                         const double                     altitude,
@@ -601,6 +661,7 @@ void renderPathTracer(  const skyPathTracerParams        model,
 
   PARAMS = model;
 
+  printf("Path Tracer Data:\n");
   {
     INT_PARAMS.sun_color = get_color(1.474f, 1.8504f, 1.91198f);
 
@@ -610,6 +671,12 @@ void renderPathTracer(  const skyPathTracerParams        model,
     sun_pos.y -= SKY_EARTH_RADIUS;
 
     INT_PARAMS.sun_pos = sun_pos;
+
+    INT_PARAMS.rayleigh_scattering.r = computeRayleighScattering(PARAMS.wavelength_red);
+    INT_PARAMS.rayleigh_scattering.g = computeRayleighScattering(PARAMS.wavelength_green);
+    INT_PARAMS.rayleigh_scattering.b = computeRayleighScattering(PARAMS.wavelength_blue);
+
+    printf("  Rayleigh Scattering: (%e,%e,%e)\n", INT_PARAMS.rayleigh_scattering.r, INT_PARAMS.rayleigh_scattering.g, INT_PARAMS.rayleigh_scattering.b);
   }
 
   for (int x = 0; x < resolution; x++) {
