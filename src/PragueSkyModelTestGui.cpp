@@ -624,7 +624,8 @@ int main(int argc, char* argv[]) {
                 680.0f, /* Wavelength Red */
                 550.0f, /* Wavelength Green */
                 440.0f, /* Wavelength Blue */
-                0.03f /* Carbondioxide Percent */
+                0.03f, /* Carbondioxide Percent */
+                0.5f /* Sampling Offset */
         };
 
         // Input window
@@ -905,6 +906,7 @@ int main(int argc, char* argv[]) {
             ImGui::SliderFloat("wavelength green", &ptParams.wavelength_green, 380.0f, 750.0f, "%.1f");
             ImGui::SliderFloat("wavelength blue", &ptParams.wavelength_blue, 380.0f, 750.0f, "%.1f");
             ImGui::SliderFloat("CO2 percentage", &ptParams.carbondioxide_percent, 0.0f, 1.0f, "%.3f");
+            ImGui::SliderFloat("sample offset", &ptParams.sampling_offset, 0.0f, 1.0f, "%.3f");
 
 
             ImGui::Dummy(ImVec2(0.0f, 1.0f));

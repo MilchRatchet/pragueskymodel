@@ -418,7 +418,7 @@ __device__ RGBF sky_extinction(const vec3 origin, const vec3 ray, const float st
   const int steps       = PARAMS.shadow_steps;
   const float step_size = length / steps;
   RGBF density          = get_color(0.0f, 0.0f, 0.0f);
-  float reach           = start;
+  float reach           = start + PARAMS.sampling_offset * step_size;
 
   for (int i = 0; i < steps; i++) {
     const vec3 pos = add_vector(origin, scale_vector(ray, reach));
@@ -491,7 +491,7 @@ __device__ RGBF sky_compute_atmosphere(const vec3 origin, const vec3 ray, const 
   if (distance > 0.0f) {
     const int steps       = PARAMS.steps;
     const float step_size = distance / steps;
-    float reach           = start;
+    float reach           = start + PARAMS.sampling_offset * step_size;
 
     for (int i = 0; i < steps; i++) {
       const vec3 pos = add_vector(origin, scale_vector(ray, reach));

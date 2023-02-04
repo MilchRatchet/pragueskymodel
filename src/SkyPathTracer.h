@@ -22,6 +22,7 @@ struct skyPathTracerParams {
     float wavelength_green;
     float wavelength_blue;
     float carbondioxide_percent;
+    float sampling_offset;
 } typedef skyPathTracerParams;
 
 void renderPathTracer(  const skyPathTracerParams        model,
