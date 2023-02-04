@@ -1,5 +1,7 @@
 #include "SkyPathTracer.h"
 
+#include "SkyOzoneCrossSections.h"
+
 #include <float.h>
 #include <math.h>
 #include <stdlib.h>
@@ -34,7 +36,8 @@
 
 #define SKY_RAYLEIGH_EXTINCTION SKY_RAYLEIGH_SCATTERING
 #define SKY_MIE_EXTINCTION scale_color(SKY_MIE_SCATTERING, 1.11f)
-#define SKY_OZONE_EXTINCTION get_color(0.65f * 0.001f, 1.881f * 0.001f, 0.085f * 0.001f)
+//#define SKY_OZONE_EXTINCTION get_color(0.65f * 0.001f, 1.881f * 0.001f, 0.085f * 0.001f)
+#define SKY_OZONE_EXTINCTION INT_PARAMS.ozone_absorption
 
 #define SKY_RAYLEIGH_DISTRIBUTION (1.0f / 8.0f)
 #define SKY_MIE_DISTRIBUTION (1.0f / 1.2f)
@@ -346,6 +349,7 @@ struct skyInternalParams {
   RGBF sun_color;
   vec3 sun_pos;
   RGBF rayleigh_scattering;
+  RGBF ozone_absorption;
 } typedef skyInternalParams;
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -396,7 +400,7 @@ __device__ float sky_ozone_density(const float height) {
     return 0.0f;
 
   if (height > 25.0f) {
-    return fmaxf(0.0f, 1.0f - fabsf(height - 25.0f) * 0.04f);
+    return expf(-0.07f * (height - 25.0f))/*fmaxf(0.0f, 1.0f - fabsf(height - 25.0f) * 0.04f)*/;
   }
   else {
     return fmaxf(0.1f, 1.0f - fabsf(height - 25.0f) * 0.066666667f);
@@ -605,6 +609,7 @@ static vec3 pixelToDirection(int x, int y, int resolution, int view) {
 
 // Wavelength in 1nm
 static float computeRayleighScattering(const float wavelength) {
+  // number molecules per cubic meter
   const double N = 2.546899 * 1e25;
 
   const double index = 1.000293;
@@ -616,7 +621,7 @@ static float computeRayleighScattering(const float wavelength) {
   const double depolarisation = 0.035;
   const double F_air = (6.0 + 3.0 * depolarisation) / (6.0 - 7.0 * depolarisation);
 #else
-  // This formula needs wavelength to be in 1 micrometre
+  // This formula needs wavelength to be in 1 micrometer
   const double lambda2 = lambda * 1e6 * lambda * 1e6;
   const double lambda4 = lambda2 * lambda2;
 
@@ -636,7 +641,13 @@ static float computeRayleighScattering(const float wavelength) {
   const double scattering = (24.0 * PI * PI * PI * (index * index - 1.0) * (index * index - 1.0))
                           / (N * lambda * lambda * lambda * lambda * (index * index + 2.0) * (index * index + 2.0));
 
+  // Convert from m^-1 to km^-1
   return (float) (scattering * F_air * 1e3);
+}
+
+static float computeOzoneAbsorption(const float wavelength) {
+  // Convert from m^-1 to km^-1
+  return (float) (ozoneCrossSectionSample(wavelength) * 1e3);
 }
 
 void renderPathTracer(  const skyPathTracerParams        model,
@@ -677,6 +688,13 @@ void renderPathTracer(  const skyPathTracerParams        model,
     INT_PARAMS.rayleigh_scattering.b = computeRayleighScattering(PARAMS.wavelength_blue);
 
     printf("  Rayleigh Scattering: (%e,%e,%e)\n", INT_PARAMS.rayleigh_scattering.r, INT_PARAMS.rayleigh_scattering.g, INT_PARAMS.rayleigh_scattering.b);
+
+    INT_PARAMS.ozone_absorption.r = computeOzoneAbsorption(PARAMS.wavelength_red);
+    INT_PARAMS.ozone_absorption.g = computeOzoneAbsorption(PARAMS.wavelength_green);
+    INT_PARAMS.ozone_absorption.b = computeOzoneAbsorption(PARAMS.wavelength_blue);
+
+    printf("  Ozone Absorption: (%e,%e,%e)\n", INT_PARAMS.ozone_absorption.r, INT_PARAMS.ozone_absorption.g, INT_PARAMS.ozone_absorption.b);
+
   }
 
   for (int x = 0; x < resolution; x++) {
