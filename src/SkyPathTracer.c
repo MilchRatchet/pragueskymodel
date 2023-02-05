@@ -547,10 +547,23 @@ __device__ RGBF sky_compute_atmosphere(const vec3 origin, const vec3 ray, const 
         const float ms_x = fmaxf(0.0f, fminf(1.0f, sun_zenith_angle * 0.5f + 0.5f));
         const float ms_y = fmaxf(0.0f, fminf(1.0f, height / SKY_ATMO_HEIGHT));
 
-        int ms_ix = (int)(ms_x * SKY_MS_TEX_SIZE);
-        int ms_iy = (int)(ms_y * SKY_MS_TEX_SIZE);
+        int ms_ix = (int)(ms_x * (SKY_MS_TEX_SIZE - 1));
+        int ms_iy = (int)(ms_y * (SKY_MS_TEX_SIZE - 1));
 
-        msRadiance = mul_color(INT_PARAMS.ms_lut[ms_ix + ms_iy * SKY_MS_TEX_SIZE], scattering);
+        int ms_ix1 = ms_ix + 1;
+        int ms_iy1 = ms_iy + 1;
+
+        RGBF ms00 = INT_PARAMS.ms_lut[ms_ix + ms_iy * SKY_MS_TEX_SIZE];
+        RGBF ms01 = INT_PARAMS.ms_lut[ms_ix + ms_iy1 * SKY_MS_TEX_SIZE];
+        RGBF ms10 = INT_PARAMS.ms_lut[ms_ix1 + ms_iy * SKY_MS_TEX_SIZE];
+        RGBF ms11 = INT_PARAMS.ms_lut[ms_ix1 + ms_iy1 * SKY_MS_TEX_SIZE];
+
+        RGBF msInterp = scale_color(ms00, (1.0f - ms_x) * (1.0f - ms_y));
+        msInterp = add_color(msInterp, scale_color(ms01, (1.0f - ms_x) * ms_y));
+        msInterp = add_color(msInterp, scale_color(ms10, ms_x * (1.0f - ms_y)));
+        msInterp = add_color(msInterp, scale_color(ms11, ms_x * ms_y));
+
+        msRadiance = mul_color(msInterp, scattering);
       }
 
       const RGBF S = mul_color(sun_radiance, add_color(ssRadiance, msRadiance));
@@ -821,7 +834,7 @@ void renderPathTracer(  const skyPathTracerParams        model,
   printf("//  Path Tracer Data:\n");
   printf("//\n");
   {
-    INT_PARAMS.sun_color = get_color(1.474f, 1.8504f, 1.91198f);
+    INT_PARAMS.sun_color = get_color(1.0f, 1.0f, 1.0f);//get_color(1.474f, 1.8504f, 1.91198f);
 
     vec3 sun_pos = angles_to_direction(elevation, azimuth);
     sun_pos = normalize_vector(sun_pos);
