@@ -621,7 +621,7 @@ int main(int argc, char* argv[]) {
                 1.0f, /* Ozone Density*/
                 8.5f, /* Rayleigh Falloff */
                 1.7f, /* Mie Falloff */
-                650.0f, /* Wavelength Red */
+                630.0f, /* Wavelength Red */
                 530.0f, /* Wavelength Green */
                 440.0f, /* Wavelength Blue */
                 0.03f, /* Carbondioxide Percent */
