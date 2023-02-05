@@ -592,7 +592,7 @@ int main(int argc, char* argv[]) {
         static std::string loadError          = "";
         static std::string outputName         = "test.exr";
         static std::string outputPath         = "test.exr";
-        static int         resolution         = 520;
+        static int         resolution         = 270;
         static int         renderedResolution = resolution;
         static bool        rendered           = false;
         static bool        rendering          = false;
@@ -607,22 +607,22 @@ int main(int argc, char* argv[]) {
         static float       visibility         = 59.4f;
         static int         visibilityToLoad   = 0;
         static int         wavelength         = 280;
-        static float       zoom               = 2.0f;
+        static float       zoom               = 4.0f;
         static skyPathTracerParams ptParams   = {
                 1, /* OZONE_ABSORPTION */
-                8, /* SHADOW_STEPS */
+                40, /* SHADOW_STEPS */
                 1.0f, /* BASE_DENSITY */
-                1000000.0f, /* SUN_STRENGTH */
-                16, /* STEPS */
+                80.0f, /* SUN_STRENGTH */
+                40, /* STEPS */
                 0, /* USE CS MIE */
                 0.8f, /* MIE G */
                 1.0f, /* Rayleigh Density*/
-                1.0f, /* Mie Density*/
+                2.5f, /* Mie Density*/
                 1.0f, /* Ozone Density*/
-                8.0f, /* Rayleigh Falloff */
-                1.2f, /* Mie Falloff */
-                680.0f, /* Wavelength Red */
-                550.0f, /* Wavelength Green */
+                8.5f, /* Rayleigh Falloff */
+                1.7f, /* Mie Falloff */
+                660.0f, /* Wavelength Red */
+                540.0f, /* Wavelength Green */
                 440.0f, /* Wavelength Blue */
                 0.03f, /* Carbondioxide Percent */
                 0.5f, /* Sampling Offset */
@@ -878,7 +878,7 @@ int main(int argc, char* argv[]) {
             ImGui::SliderFloat("density", &ptParams.base_density, 0.0f, 10.0f, "%.1f");
             ImGui::SameLine();
             helpMarker("Density of the atmosphere");
-            ImGui::SliderFloat("sun intensity", &ptParams.sun_strength, 0.0f, 2000000.0f, "%.1f");
+            ImGui::SliderFloat("sun intensity", &ptParams.sun_strength, 0.0f, 500.0f, "%.1f");
             ImGui::SameLine();
             helpMarker("Intensity of sun");
             ImGui::Checkbox("ozone absorption", (bool*)&ptParams.ozone_absorption);
