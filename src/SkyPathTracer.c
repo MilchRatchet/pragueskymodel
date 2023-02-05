@@ -395,6 +395,7 @@ __device__ float sky_mie_density(const float height) {
   } else if (height < 3.0f) {
     WASO = 3.0f - height;
   }
+  WASO *= 60.0f / PARAMS.ground_visibility;
 
   return INSO + WASO;
 }
