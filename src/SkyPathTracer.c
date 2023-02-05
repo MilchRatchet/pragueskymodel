@@ -42,6 +42,8 @@
 #define SKY_RAYLEIGH_DISTRIBUTION (1.0f / 8.0f)
 #define SKY_MIE_DISTRIBUTION (1.0f / 1.2f)
 
+#define SKY_MS_TEX_SIZE 32
+
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
 //  Math Helper Section
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -350,6 +352,7 @@ struct skyInternalParams {
   vec3 sun_pos;
   RGBF rayleigh_scattering;
   RGBF ozone_absorption;
+  RGBF* ms_lut;
 } typedef skyInternalParams;
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -525,11 +528,12 @@ __device__ RGBF sky_compute_atmosphere(const vec3 origin, const vec3 ray, const 
       // Amount of light that reached pos
       RGBF S = scale_color(INT_PARAMS.sun_color, PARAMS.sun_strength);
       S      = mul_color(S, extinction_sun);
+      S      = scale_color(S, light_angle);
 
       // Amount of light that gets scattered towards camera at pos
       RGBF scattering = scale_color(SKY_RAYLEIGH_SCATTERING, density_rayleigh * phase_rayleigh);
       scattering      = add_color(scattering, scale_color(SKY_MIE_SCATTERING, density_mie * phase_mie));
-      scattering      = scale_color(scattering, PARAMS.base_density * light_angle);
+      scattering      = scale_color(scattering, PARAMS.base_density);
 
       S = mul_color(S, scattering);
 
@@ -546,6 +550,36 @@ __device__ RGBF sky_compute_atmosphere(const vec3 origin, const vec3 ray, const 
 
       // Amount of light that gets scattered towards camera along this step
       S = mul_color(sub_color(S, mul_color(S, step_transmittance)), inv_color(extinction));
+
+      if (PARAMS.use_ms) {
+        const float sun_zenith_angle = dot_product(ray_scatter, normalize_vector(pos));
+
+        const float ms_x = sun_zenith_angle * 0.5f + 0.5f;
+        const float ms_y = height / SKY_ATMO_HEIGHT;
+
+        int ms_ix = (int)(ms_x * SKY_MS_TEX_SIZE);
+        int ms_iy = (int)(ms_y * SKY_MS_TEX_SIZE);
+
+#ifndef max
+#define max(a,b) (((a) > (b)) ? (a) : (b))
+#endif
+#ifndef min
+#define min(a,b) (((a) < (b)) ? (a) : (b))
+#endif
+
+        ms_ix = max(0, ms_ix);
+        ms_iy = max(0, ms_iy);
+
+        ms_ix = min(SKY_MS_TEX_SIZE - 1, ms_ix);
+        ms_iy = min(SKY_MS_TEX_SIZE - 1, ms_iy);
+
+        RGBF ms = INT_PARAMS.ms_lut[ms_ix + ms_iy * SKY_MS_TEX_SIZE];
+        ms = mul_color(ms, scattering);
+        ms = mul_color(ms, scale_color(INT_PARAMS.sun_color, PARAMS.sun_strength));
+
+        //S = add_color(S, ms);
+        S = ms;
+      }
 
       result = add_color(result, mul_color(S, transmittance));
 
@@ -650,6 +684,149 @@ static float computeOzoneAbsorption(const float wavelength) {
   return (float) (ozoneCrossSectionSample(wavelength) * 1e3);
 }
 
+struct msScatteringResult {
+  RGBF L;
+  RGBF multiScatterAs1;
+} typedef msScatteringResult;
+
+static msScatteringResult computeMultiScatteringIntegration(vec3 origin, vec3 ray, vec3 sun_dir) {
+  msScatteringResult result;
+
+  result.L = get_color(0.0f, 0.0f, 0.0f);
+  result.multiScatterAs1 = get_color(0.0f, 0.0f, 0.0f);
+
+  float2 path = sky_compute_path(origin, ray, SKY_EARTH_RADIUS, SKY_ATMO_RADIUS);
+
+  if (path.y == -FLT_MAX) {
+    return result;
+  }
+
+  const float start    = path.x;
+  const float distance = path.y;
+
+  if (distance > 0.0f) {
+    const int steps       = PARAMS.steps;
+    const float step_size = distance / steps;
+    float reach           = start + PARAMS.sampling_offset * step_size;
+
+    const float cos_angle = dot_product(ray, sun_dir);
+    const float phase_uniform = 1.0f / (4.0f * PI);
+
+    RGBF transmittance = get_color(1.0f, 1.0f, 1.0f);
+
+    for (int i = 0; i < steps; i++) {
+      const vec3 pos = add_vector(origin, scale_vector(ray, reach));
+
+      const float height = sky_height(pos);
+      if (height < 0.0f || height > SKY_ATMO_HEIGHT) {
+        reach += step_size;
+        continue;
+      }
+
+      const float light_angle = sample_sphere_solid_angle(INT_PARAMS.sun_pos, SKY_SUN_RADIUS, pos);
+
+      const float scatter_distance = (sph_ray_hit_p0(sun_dir, pos, SKY_EARTH_RADIUS)) ? 0.0f : sph_ray_int_p0(sun_dir, pos, SKY_ATMO_RADIUS);
+
+      // If scatter_distance is 0.0 then all light is extinct
+      // This is not very beautiful but it seems to be the easiest approach
+      const RGBF extinction_sun = sky_extinction(pos, sun_dir, 0.0f, scatter_distance);
+
+      const float density_rayleigh = sky_density_falloff(height, 1.0f / PARAMS.rayleigh_height_falloff) * PARAMS.density_rayleigh;
+      //const float density_mie      = sky_density_falloff(height, 1.0f / PARAMS.mie_height_falloff) * PARAMS.density_mie;
+      const float density_mie      = sky_aerosol_density(height) * PARAMS.density_mie;
+      const float density_ozone    = sky_ozone_density(height) * PARAMS.density_ozone;
+
+      // Amount of light that reached pos
+      RGBF S = extinction_sun;
+
+      // Amount of light that gets scattered towards camera at pos
+      RGBF scattering = scale_color(SKY_RAYLEIGH_SCATTERING, density_rayleigh * phase_uniform);
+      scattering      = add_color(scattering, scale_color(SKY_MIE_SCATTERING, density_mie * phase_uniform));
+      scattering      = scale_color(scattering, PARAMS.base_density * light_angle);
+
+      S = mul_color(S, scattering);
+
+      RGBF extinction = scale_color(SKY_RAYLEIGH_EXTINCTION, density_rayleigh);
+      extinction      = add_color(extinction, scale_color(SKY_MIE_EXTINCTION, density_mie));
+      extinction      = add_color(extinction, scale_color(SKY_OZONE_EXTINCTION, density_ozone));
+      extinction      = scale_color(extinction, PARAMS.base_density);
+
+      // Amount of light that gets lost along this step
+      RGBF step_transmittance;
+      step_transmittance.r = expf(-step_size * extinction.r);
+      step_transmittance.g = expf(-step_size * extinction.g);
+      step_transmittance.b = expf(-step_size * extinction.b);
+
+      // Amount of light that gets scattered towards camera along this step
+      S = mul_color(sub_color(S, mul_color(S, step_transmittance)), inv_color(extinction));
+
+      result.L = add_color(result.L, mul_color(S, transmittance));
+
+      result.multiScatterAs1 = add_color(result.multiScatterAs1, mul_color(sub_color(scattering, mul_color(scattering, step_transmittance)), inv_color(extinction)));
+
+      transmittance = mul_color(transmittance, step_transmittance);
+
+      reach += step_size;
+    }
+  }
+
+  return result;
+}
+
+#define saturatef(x) fmaxf(0.0f, fminf(1.0f, (x)))
+
+// Hillaire 2020
+static void computeMultiScattering(RGBF** msTex) {
+  if (*msTex) {
+    free(*msTex);
+  }
+
+  *msTex = malloc(sizeof(RGBF) * SKY_MS_TEX_SIZE * SKY_MS_TEX_SIZE);
+
+  for (int x = 0; x < SKY_MS_TEX_SIZE; x++) {
+    for (int y = 0; y < SKY_MS_TEX_SIZE; y++) {
+      const float fx = ((float)x + 0.5f) / SKY_MS_TEX_SIZE;
+      const float fy = ((float)y + 0.5f) / SKY_MS_TEX_SIZE;
+
+      float cos_angle = fx * 2.0f - 1.0f;
+      vec3 sun_dir = get_vector(0.0f, cos_angle, sqrtf(saturatef(1.0f - cos_angle * cos_angle)));
+
+      float height = SKY_EARTH_RADIUS + saturatef(fy) * SKY_ATMO_HEIGHT + 0.001f;
+
+      vec3 pos = get_vector(0.0f, height, 0.0f);
+
+      RGBF inscatteredLuminance = get_color(0.0f, 0.0f, 0.0f);
+      RGBF multiScattering = get_color(0.0f, 0.0f, 0.0f);
+
+      const float sqrt_sample = 8.0f;
+
+      for (int i = 0; i < 64; i++) {
+        float a = 0.5f + i / 8;
+        float b = 0.5f + (i - ((i/8) * 8));
+        float randA = a / sqrt_sample;
+        float randB = b / sqrt_sample;
+        float theta = 2.0f * PI * randA;
+        float phi = acosf(1.0f - 2.0f * randB);
+        vec3 ray = angles_to_direction(phi, theta);
+
+        msScatteringResult result = computeMultiScatteringIntegration(pos, ray, sun_dir);
+
+        inscatteredLuminance = add_color(inscatteredLuminance, result.L);
+        multiScattering = add_color(multiScattering, result.multiScatterAs1);
+      }
+
+      inscatteredLuminance = scale_color(inscatteredLuminance, 1.0f / (sqrt_sample * sqrt_sample));
+      multiScattering = scale_color(multiScattering, 1.0f / (sqrt_sample * sqrt_sample));
+
+      RGBF multiScatteringContribution = inv_color(sub_color(get_color(1.0f, 1.0f, 1.0f), multiScattering));
+
+      RGBF L = mul_color(inscatteredLuminance, multiScatteringContribution);
+
+      INT_PARAMS.ms_lut[x + y * SKY_MS_TEX_SIZE] = L;
+    }
+  }
+}
+
 void renderPathTracer(  const skyPathTracerParams        model,
                         const double                     albedo,
                         const double                     altitude,
@@ -660,7 +837,7 @@ void renderPathTracer(  const skyPathTracerParams        model,
                         const double                     visibility,
                         float**                          outResult) {
 
-  vec3 pos = {.x = 0.0f, .y = altitude + SKY_EARTH_RADIUS + 0.1f, .z = 0.0f};
+  vec3 pos = {.x = 0.0f, .y = altitude + SKY_EARTH_RADIUS + 0.001f, .z = 0.0f};
 
   if (*outResult) {
     free(*outResult);
@@ -672,7 +849,10 @@ void renderPathTracer(  const skyPathTracerParams        model,
 
   PARAMS = model;
 
-  printf("Path Tracer Data:\n");
+  printf("//////////////////////////////////////\n");
+  printf("//\n");
+  printf("//  Path Tracer Data:\n");
+  printf("//\n");
   {
     INT_PARAMS.sun_color = get_color(1.474f, 1.8504f, 1.91198f);
 
@@ -687,14 +867,23 @@ void renderPathTracer(  const skyPathTracerParams        model,
     INT_PARAMS.rayleigh_scattering.g = computeRayleighScattering(PARAMS.wavelength_green);
     INT_PARAMS.rayleigh_scattering.b = computeRayleighScattering(PARAMS.wavelength_blue);
 
-    printf("  Rayleigh Scattering: (%e,%e,%e)\n", INT_PARAMS.rayleigh_scattering.r, INT_PARAMS.rayleigh_scattering.g, INT_PARAMS.rayleigh_scattering.b);
+    printf("//    Rayleigh Scattering: (%e,%e,%e)\n", INT_PARAMS.rayleigh_scattering.r, INT_PARAMS.rayleigh_scattering.g, INT_PARAMS.rayleigh_scattering.b);
 
     INT_PARAMS.ozone_absorption.r = computeOzoneAbsorption(PARAMS.wavelength_red);
     INT_PARAMS.ozone_absorption.g = computeOzoneAbsorption(PARAMS.wavelength_green);
     INT_PARAMS.ozone_absorption.b = computeOzoneAbsorption(PARAMS.wavelength_blue);
 
-    printf("  Ozone Absorption: (%e,%e,%e)\n", INT_PARAMS.ozone_absorption.r, INT_PARAMS.ozone_absorption.g, INT_PARAMS.ozone_absorption.b);
+    printf("//    Ozone Absorption: (%e,%e,%e)\n", INT_PARAMS.ozone_absorption.r, INT_PARAMS.ozone_absorption.g, INT_PARAMS.ozone_absorption.b);
 
+    INT_PARAMS.ms_lut = (RGBF*)0;
+    computeMultiScattering(&INT_PARAMS.ms_lut);
+  }
+  printf("//\n");
+
+  if (resolution == SKY_MS_TEX_SIZE) {
+    free(*outResult);
+    *outResult = INT_PARAMS.ms_lut;
+    return;
   }
 
   for (int x = 0; x < resolution; x++) {
@@ -713,4 +902,5 @@ void renderPathTracer(  const skyPathTracerParams        model,
     }
   }
 
+  free(INT_PARAMS.ms_lut);
 }
