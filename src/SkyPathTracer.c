@@ -1,6 +1,7 @@
 #include "SkyPathTracer.h"
 
 #include "SkyOzoneCrossSections.h"
+#include "SkySpectrum2RGB.h"
 
 #include <float.h>
 #include <math.h>
@@ -477,6 +478,50 @@ __device__ float2 sky_compute_path(const vec3 origin, const vec3 ray, const floa
   }
 
   return make_float2(start, distance);
+}
+
+// assumes that wavelengths are sorted with blue lowest, red highest
+static float sky_interpolate_radiance_at_wavelength(RGBF radiance, float wavelength) {
+  if (wavelength < PARAMS.wavelength_blue) {
+    return radiance.b;
+  }
+
+  if (wavelength < PARAMS.wavelength_green) {
+    float u = (wavelength - PARAMS.wavelength_blue) / (PARAMS.wavelength_green - PARAMS.wavelength_blue);
+    return radiance.g * u + radiance.b * (1.0f - u);
+  }
+
+  if (wavelength < PARAMS.wavelength_red) {
+    float u = (wavelength - PARAMS.wavelength_green) / (PARAMS.wavelength_red - PARAMS.wavelength_green);
+    return radiance.r * u + radiance.g * (1.0f - u);
+  }
+
+  return radiance.r;
+}
+
+// Conversion of spectrum to sRGB as in Bruneton2017
+// https://github.com/ebruneton/precomputed_atmospheric_scattering
+__device__ RGBF sky_convert_wavelengths_to_sRGB(RGBF radiance) {
+  float x = 0.0f;
+  float y = 0.0f;
+  float z = 0.0f;
+  float step_size = 1.0f;
+
+  for (float lambda = SKY_WAVELENGTH_MIN; lambda < SKY_WAVELENGTH_MAX; lambda += step_size) {
+    const float v = sky_interpolate_radiance_at_wavelength(radiance, lambda);
+    x += CieColorMatchingFunctionTableValue(lambda, 1) * v;
+    y += CieColorMatchingFunctionTableValue(lambda, 2) * v;
+    z += CieColorMatchingFunctionTableValue(lambda, 3) * v;
+  }
+
+  const float MAX_LUMINOUS_EFFICACY = 683.0f / (SKY_WAVELENGTH_MAX - SKY_WAVELENGTH_MIN);
+
+  RGBF result;
+  result.r = MAX_LUMINOUS_EFFICACY * step_size * (3.2406f * x - 1.5372f * y - 0.4986f * z);
+  result.g = MAX_LUMINOUS_EFFICACY * step_size * (-0.9689f * x + 1.8758f * y + 0.0415f * z);
+  result.b = MAX_LUMINOUS_EFFICACY * step_size * (0.0557f * x - 0.2040f * y + 1.0570f * z);
+
+  return result;
 }
 
 __device__ RGBF sky_compute_atmosphere(const vec3 origin, const vec3 ray, const float limit) {
