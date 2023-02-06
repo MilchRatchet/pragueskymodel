@@ -627,7 +627,8 @@ int main(int argc, char* argv[]) {
                 0.03f, /* Carbondioxide Percent */
                 0.5f, /* Sampling Offset */
                 1, /* Use Multiscattering */
-                59.4f /* Ground Visibility */
+                59.4f, /* Ground Visibility */
+                1.0f /* Multiscattering Factor */
         };
 
         // Input window
@@ -911,7 +912,7 @@ int main(int argc, char* argv[]) {
             ImGui::SliderFloat("sample offset", &ptParams.sampling_offset, 0.0f, 1.0f, "%.3f");
             ImGui::Checkbox("use multiscattering", (bool*)&ptParams.use_ms);
             ImGui::SliderFloat("ground visibility", &ptParams.ground_visibility, 20.0f, 131.8f, "%.1f km");
-
+            ImGui::SliderFloat("multiscattering factor", &ptParams.ms_factor, 0.0f, 2.0f, "%.3f");
 
             ImGui::Dummy(ImVec2(0.0f, 1.0f));
             ImGui::Separator();

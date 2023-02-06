@@ -25,6 +25,7 @@ struct skyPathTracerParams {
     float sampling_offset;
     int use_ms;
     float ground_visibility;
+    float ms_factor;
 } typedef skyPathTracerParams;
 
 void renderPathTracer(  const skyPathTracerParams        model,

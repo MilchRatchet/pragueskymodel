@@ -2,6 +2,7 @@
 
 #include "SkyOzoneCrossSections.h"
 #include "SkySpectrum2RGB.h"
+#include "SkySunRadiance.h"
 
 #include <float.h>
 #include <math.h>
@@ -382,12 +383,12 @@ __device__ float sky_rayleigh_density(const float height) {
 
 __device__ float sky_mie_density(const float height) {
   // INSO (insoluble = dust-like particles)
-  float INSO = 0.0f;//expf(-height * (1.0f / PARAMS.mie_height_falloff));
-  if (height < 2.0f) {
+  float INSO = expf(-height * (1.0f / PARAMS.mie_height_falloff));
+  /*if (height < 2.0f) {
     INSO = expf(-height * (1.0f / 8.0f));
   } else if (height < 12.0f) {
     INSO = 0.3f * expf(-height * (1.0f / 8.0f));
-  }
+  }*/
 
   // WASO (water soluble = biogenic particles, organic carbon)
   float WASO = 0.0f;
@@ -514,7 +515,7 @@ __device__ RGBF sky_convert_wavelengths_to_sRGB(RGBF radiance) {
     z += CieColorMatchingFunctionTableValue(lambda, 3) * v;
   }
 
-  const float MAX_LUMINOUS_EFFICACY = 683.0f / (SKY_WAVELENGTH_MAX - SKY_WAVELENGTH_MIN);
+  const float MAX_LUMINOUS_EFFICACY = /*683.0f*/ 1.0f / (SKY_WAVELENGTH_MAX - SKY_WAVELENGTH_MIN);
 
   RGBF result;
   result.r = MAX_LUMINOUS_EFFICACY * step_size * (3.2406f * x - 1.5372f * y - 0.4986f * z);
@@ -583,7 +584,7 @@ __device__ RGBF sky_compute_atmosphere(const vec3 origin, const vec3 ray, const 
       const RGBF extinction = add_color(add_color(extinction_rayleigh, extinction_mie), extinction_ozone);
       const RGBF phaseTimesScattering = add_color(scale_color(scattering_rayleigh, phase_rayleigh), scale_color(scattering_mie, phase_mie));
 
-      const RGBF ssRadiance = scale_color(mul_color(extinction_sun, phaseTimesScattering), shadow);
+      const RGBF ssRadiance = scale_color(mul_color(extinction_sun, phaseTimesScattering), shadow * light_angle);
       RGBF msRadiance = get_color(0.0f, 0.0f, 0.0f);
 
       if (PARAMS.use_ms) {
@@ -650,7 +651,7 @@ __device__ RGBF sky_compute_atmosphere(const vec3 origin, const vec3 ray, const 
     result = add_color(result, S);
   }
 
-  return result;
+  return sky_convert_wavelengths_to_sRGB(result);
 }
 
 static vec3 angles_to_direction(const float altitude, const float azimuth) {
@@ -762,6 +763,7 @@ static msScatteringResult computeMultiScatteringIntegration(vec3 origin, vec3 ra
       reach = newReach;
 
       const vec3 pos = add_vector(origin, scale_vector(ray, reach));
+      const float light_angle = sample_sphere_solid_angle(INT_PARAMS.sun_pos, SKY_SUN_RADIUS, pos);
 
       const float scatter_distance = sph_ray_int_p0(sun_dir, pos, SKY_ATMO_RADIUS);
       const RGBF extinction_sun = sky_extinction(pos, sun_dir, 0.0f, scatter_distance);
@@ -783,7 +785,7 @@ static msScatteringResult computeMultiScatteringIntegration(vec3 origin, vec3 ra
       const RGBF phaseTimesScattering = scale_color(scattering, phase_uniform);
 
       const float shadow = sph_ray_hit_p0(sun_dir, pos, SKY_EARTH_RADIUS) ? 0.0f : 1.0f;
-      const RGBF S = scale_color(mul_color(extinction_sun, phaseTimesScattering), shadow);
+      const RGBF S = scale_color(mul_color(extinction_sun, phaseTimesScattering), shadow * light_angle);
 
       RGBF step_transmittance;
       step_transmittance.r = expf(-step_size * extinction.r);
@@ -850,7 +852,7 @@ static void computeMultiScattering(RGBF** msTex) {
 
       RGBF multiScatteringContribution = inv_color(sub_color(get_color(1.0f, 1.0f, 1.0f), multiScattering));
 
-      RGBF L = mul_color(inscatteredLuminance, multiScatteringContribution);
+      RGBF L = scale_color(mul_color(inscatteredLuminance, multiScatteringContribution), PARAMS.ms_factor);
 
       INT_PARAMS.ms_lut[x + y * SKY_MS_TEX_SIZE] = L;
     }
@@ -884,7 +886,10 @@ void renderPathTracer(  const skyPathTracerParams        model,
   printf("//  Path Tracer Data:\n");
   printf("//\n");
   {
-    INT_PARAMS.sun_color = get_color(1.0f, 1.0f, 1.0f);//get_color(1.474f, 1.8504f, 1.91198f);
+    //get_color(1.474f, 1.8504f, 1.91198f);
+    INT_PARAMS.sun_color.r = sunRadianceAtWavelength(PARAMS.wavelength_red);
+    INT_PARAMS.sun_color.g = sunRadianceAtWavelength(PARAMS.wavelength_green);
+    INT_PARAMS.sun_color.b = sunRadianceAtWavelength(PARAMS.wavelength_blue);
 
     vec3 sun_pos = angles_to_direction(elevation, azimuth);
     sun_pos = normalize_vector(sun_pos);
