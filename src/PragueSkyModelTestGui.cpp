@@ -628,7 +628,8 @@ int main(int argc, char* argv[]) {
                 0.5f, /* Sampling Offset */
                 1, /* Use Multiscattering */
                 59.4f, /* Ground Visibility */
-                1.0f /* Multiscattering Factor */
+                1.0f, /* Multiscattering Factor */
+                0 /* Convert Spectrum */
         };
 
         // Input window
@@ -913,6 +914,7 @@ int main(int argc, char* argv[]) {
             ImGui::Checkbox("use multiscattering", (bool*)&ptParams.use_ms);
             ImGui::SliderFloat("ground visibility", &ptParams.ground_visibility, 20.0f, 131.8f, "%.1f km");
             ImGui::SliderFloat("multiscattering factor", &ptParams.ms_factor, 0.0f, 2.0f, "%.3f");
+            ImGui::Checkbox("convert spectrum to rgb", (bool*)&ptParams.convertSpectrum);
 
             ImGui::Dummy(ImVec2(0.0f, 1.0f));
             ImGui::Separator();

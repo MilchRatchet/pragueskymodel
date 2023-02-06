@@ -503,6 +503,10 @@ static float sky_interpolate_radiance_at_wavelength(RGBF radiance, float wavelen
 // Conversion of spectrum to sRGB as in Bruneton2017
 // https://github.com/ebruneton/precomputed_atmospheric_scattering
 __device__ RGBF sky_convert_wavelengths_to_sRGB(RGBF radiance) {
+  if (!PARAMS.convertSpectrum) {
+    return radiance;
+  }
+
   float x = 0.0f;
   float y = 0.0f;
   float z = 0.0f;
