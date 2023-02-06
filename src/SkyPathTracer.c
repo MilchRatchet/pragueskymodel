@@ -29,6 +29,7 @@
 #define SKY_MOON_DISTANCE 384399.0f
 #define SKY_ATMO_HEIGHT 100.0f
 #define SKY_ATMO_RADIUS SKY_ATMO_HEIGHT + SKY_EARTH_RADIUS
+#define SKY_HEIGHT_OFFSET 0.001f
 
 //#define SKY_RAYLEIGH_SCATTERING get_color(5.8f * 0.001f, 13.558f * 0.001f, 33.1f * 0.001f)
 #define SKY_RAYLEIGH_SCATTERING INT_PARAMS.rayleigh_scattering
@@ -376,17 +377,17 @@ __device__ float sky_mie_phase(const float cos_angle) {
 }
 
 __device__ float sky_rayleigh_density(const float height) {
-  return expf(-height * (1.0f / PARAMS.rayleigh_height_falloff));
+  return PARAMS.base_density * expf(-height * (1.0f / PARAMS.rayleigh_height_falloff));
 }
 
 __device__ float sky_mie_density(const float height) {
   // INSO (insoluble = dust-like particles)
-  float INSO = expf(-height * (1.0f / PARAMS.mie_height_falloff));
-  /*if (height < 2.0f) {
+  float INSO = 0.0f;//expf(-height * (1.0f / PARAMS.mie_height_falloff));
+  if (height < 2.0f) {
     INSO = expf(-height * (1.0f / 8.0f));
   } else if (height < 12.0f) {
     INSO = 0.3f * expf(-height * (1.0f / 8.0f));
-  }*/
+  }
 
   // WASO (water soluble = biogenic particles, organic carbon)
   float WASO = 0.0f;
@@ -397,7 +398,7 @@ __device__ float sky_mie_density(const float height) {
   }
   WASO *= 60.0f / PARAMS.ground_visibility;
 
-  return INSO + WASO;
+  return PARAMS.base_density * (INSO + WASO);
 }
 
 __device__ float sky_ozone_density(const float height) {
@@ -405,10 +406,10 @@ __device__ float sky_ozone_density(const float height) {
     return 0.0f;
 
   if (height > 25.0f) {
-    return expf(-0.07f * (height - 25.0f))/*fmaxf(0.0f, 1.0f - fabsf(height - 25.0f) * 0.04f)*/;
+    return PARAMS.base_density * expf(-0.07f * (height - 25.0f))/*fmaxf(0.0f, 1.0f - fabsf(height - 25.0f) * 0.04f)*/;
   }
   else {
-    return fmaxf(0.1f, 1.0f - fabsf(height - 25.0f) * 0.066666667f);
+    return PARAMS.base_density * fmaxf(0.1f, 1.0f - fabsf(height - 25.0f) * 0.066666667f);
   }
 }
 
@@ -445,9 +446,7 @@ __device__ RGBF sky_extinction(const vec3 origin, const vec3 ray, const float st
     density = add_color(density, scale_color(D, step_size));
   }
 
-  density = scale_color(density, -PARAMS.base_density);
-
-  return get_color(expf(density.r), expf(density.g), expf(density.b));
+  return get_color(expf(-density.r), expf(-density.g), expf(-density.b));
 }
 
 /*
@@ -590,24 +589,29 @@ __device__ RGBF sky_compute_atmosphere(const vec3 origin, const vec3 ray, const 
       if (PARAMS.use_ms) {
         const float sun_zenith_angle = dot_product(ray_scatter, normalize_vector(pos));
 
-        const float ms_x = fmaxf(0.0f, fminf(1.0f, sun_zenith_angle * 0.5f + 0.5f));
-        const float ms_y = fmaxf(0.0f, fminf(1.0f, height / SKY_ATMO_HEIGHT));
+        const float ms_x = fmaxf(0.0f, fminf(1.0f, sun_zenith_angle * 0.5f + 0.5f)) * (SKY_MS_TEX_SIZE - 1);
+        const float ms_y = fmaxf(0.0f, fminf(1.0f, height / SKY_ATMO_HEIGHT)) * (SKY_MS_TEX_SIZE - 1);
 
-        int ms_ix = (int)(ms_x * (SKY_MS_TEX_SIZE - 1));
-        int ms_iy = (int)(ms_y * (SKY_MS_TEX_SIZE - 1));
+        const int ms_ix = (int)(ms_x);
+        const int ms_iy = (int)(ms_y);
 
-        int ms_ix1 = ms_ix + 1;
-        int ms_iy1 = ms_iy + 1;
+        const int ms_ix1 = ms_ix + 1;
+        const int ms_iy1 = ms_iy + 1;
 
-        RGBF ms00 = INT_PARAMS.ms_lut[ms_ix + ms_iy * SKY_MS_TEX_SIZE];
-        RGBF ms01 = INT_PARAMS.ms_lut[ms_ix + ms_iy1 * SKY_MS_TEX_SIZE];
-        RGBF ms10 = INT_PARAMS.ms_lut[ms_ix1 + ms_iy * SKY_MS_TEX_SIZE];
-        RGBF ms11 = INT_PARAMS.ms_lut[ms_ix1 + ms_iy1 * SKY_MS_TEX_SIZE];
+        const RGBF ms00 = INT_PARAMS.ms_lut[ms_ix + ms_iy * SKY_MS_TEX_SIZE];
+        const RGBF ms01 = INT_PARAMS.ms_lut[ms_ix + ms_iy1 * SKY_MS_TEX_SIZE];
+        const RGBF ms10 = INT_PARAMS.ms_lut[ms_ix1 + ms_iy * SKY_MS_TEX_SIZE];
+        const RGBF ms11 = INT_PARAMS.ms_lut[ms_ix1 + ms_iy1 * SKY_MS_TEX_SIZE];
 
-        RGBF msInterp = scale_color(ms00, (1.0f - ms_x) * (1.0f - ms_y));
-        msInterp = add_color(msInterp, scale_color(ms01, (1.0f - ms_x) * ms_y));
-        msInterp = add_color(msInterp, scale_color(ms10, ms_x * (1.0f - ms_y)));
-        msInterp = add_color(msInterp, scale_color(ms11, ms_x * ms_y));
+        const float w00 = (ms_ix1 - ms_x) * (ms_iy1 - ms_y);
+        const float w01 = (ms_ix1 - ms_x) * (ms_y - ms_iy);
+        const float w10 = (ms_x - ms_ix) * (ms_iy1 - ms_y);
+        const float w11 = (ms_x - ms_ix) * (ms_y - ms_iy);
+
+        RGBF msInterp = scale_color(ms00, w00);
+        msInterp = add_color(msInterp, scale_color(ms01, w01));
+        msInterp = add_color(msInterp, scale_color(ms10, w10));
+        msInterp = add_color(msInterp, scale_color(ms11, w11));
 
         msRadiance = mul_color(msInterp, scattering);
       }
@@ -817,7 +821,7 @@ static void computeMultiScattering(RGBF** msTex) {
 
       float cos_angle = fx * 2.0f - 1.0f;
       vec3 sun_dir = get_vector(0.0f, cos_angle, -sinf(acosf(cos_angle)));
-      float height = SKY_EARTH_RADIUS + saturatef(fy) * SKY_ATMO_HEIGHT + 0.001f;
+      float height = SKY_EARTH_RADIUS + saturatef(fy + SKY_HEIGHT_OFFSET) * (SKY_ATMO_HEIGHT - SKY_HEIGHT_OFFSET);
 
       vec3 pos = get_vector(0.0f, height, 0.0f);
 
@@ -863,7 +867,7 @@ void renderPathTracer(  const skyPathTracerParams        model,
                         const double                     visibility,
                         float**                          outResult) {
 
-  vec3 pos = {.x = 0.0f, .y = altitude + SKY_EARTH_RADIUS + 0.001f, .z = 0.0f};
+  vec3 pos = {.x = 0.0f, .y = altitude / 1000.0f + SKY_EARTH_RADIUS + SKY_HEIGHT_OFFSET, .z = 0.0f};
 
   if (*outResult) {
     free(*outResult);
