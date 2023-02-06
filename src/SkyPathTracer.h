@@ -27,6 +27,7 @@ struct skyPathTracerParams {
     float ground_visibility;
     float ms_factor;
     int convertSpectrum;
+    int use_tm_lut;
 } typedef skyPathTracerParams;
 
 void renderPathTracer(  const skyPathTracerParams        model,

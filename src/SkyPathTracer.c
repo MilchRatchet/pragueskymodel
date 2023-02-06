@@ -29,7 +29,7 @@
 #define SKY_MOON_RADIUS 1737.4f
 #define SKY_MOON_DISTANCE 384399.0f
 #define SKY_ATMO_HEIGHT 100.0f
-#define SKY_ATMO_RADIUS SKY_ATMO_HEIGHT + SKY_EARTH_RADIUS
+#define SKY_ATMO_RADIUS (SKY_ATMO_HEIGHT + SKY_EARTH_RADIUS)
 #define SKY_HEIGHT_OFFSET 0.001f
 
 //#define SKY_RAYLEIGH_SCATTERING get_color(5.8f * 0.001f, 13.558f * 0.001f, 33.1f * 0.001f)
@@ -46,10 +46,15 @@
 #define SKY_MIE_DISTRIBUTION (1.0f / 1.2f)
 
 #define SKY_MS_TEX_SIZE 32
+#define SKY_TM_TEX_WIDTH 256
+#define SKY_TM_TEX_HEIGHT 64
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
 //  Math Helper Section
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
+
+float fromUnitToSubUvs(float u, float resolution) { return (u + 0.5f / resolution) * (resolution / (resolution + 1.0f)); }
+float fromSubUvsToUnit(float u, float resolution) { return (u - 0.5f / resolution) * (resolution / (resolution - 1.0f)); }
 
 struct float2 {
     float x;
@@ -356,6 +361,7 @@ struct skyInternalParams {
   RGBF rayleigh_scattering;
   RGBF ozone_absorption;
   RGBF* ms_lut;
+  RGBF* tm_lut;
 } typedef skyInternalParams;
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -364,6 +370,57 @@ struct skyInternalParams {
 
 static skyPathTracerParams PARAMS;
 static skyInternalParams INT_PARAMS;
+
+// Hillaire2020
+__device__ float2 sky_transmittance_lut_uv(float height, float zenith_cos_angle) {
+  height += SKY_EARTH_RADIUS;
+	float H = sqrtf(fmaxf(0.0f, SKY_ATMO_RADIUS * SKY_ATMO_RADIUS - SKY_EARTH_RADIUS * SKY_EARTH_RADIUS));
+	float rho = sqrtf(fmaxf(0.0f, height * height - SKY_EARTH_RADIUS * SKY_EARTH_RADIUS));
+
+	float discriminant = height * height * (zenith_cos_angle * zenith_cos_angle - 1.0) + SKY_ATMO_RADIUS * SKY_ATMO_RADIUS;
+	float d = fmaxf(0.0, (-height * zenith_cos_angle + sqrtf(discriminant))); // Distance to atmosphere boundary
+
+	float d_min = SKY_ATMO_RADIUS - height;
+	float d_max = rho + H;
+	float x_mu = (d - d_min) / (d_max - d_min);
+	float x_r = rho / H;
+
+	return make_float2(x_mu, x_r);
+}
+
+__device__ RGBF sky_sample_tex(RGBF* tex, float2 uv, int width, int height) {
+    float ms_x = fmaxf(0.0f, fminf(1.0f, uv.x));
+    float ms_y = fmaxf(0.0f, fminf(1.0f, uv.y));
+
+    ms_x = fromUnitToSubUvs(ms_x, width);
+    ms_y = fromUnitToSubUvs(ms_y, height);
+
+    ms_x *= (width - 1);
+    ms_y *= (height - 1);
+
+    const int ms_ix = (int)(ms_x);
+    const int ms_iy = (int)(ms_y);
+
+    const int ms_ix1 = ms_ix + 1;
+    const int ms_iy1 = ms_iy + 1;
+
+    const RGBF ms00 = tex[ms_ix + ms_iy * width];
+    const RGBF ms01 = tex[ms_ix + ms_iy1 * width];
+    const RGBF ms10 = tex[ms_ix1 + ms_iy * width];
+    const RGBF ms11 = tex[ms_ix1 + ms_iy1 * width];
+
+    const float w00 = (ms_ix1 - ms_x) * (ms_iy1 - ms_y);
+    const float w01 = (ms_ix1 - ms_x) * (ms_y - ms_iy);
+    const float w10 = (ms_x - ms_ix) * (ms_iy1 - ms_y);
+    const float w11 = (ms_x - ms_ix) * (ms_y - ms_iy);
+
+    RGBF interp = scale_color(ms00, w00);
+    interp = add_color(interp, scale_color(ms01, w01));
+    interp = add_color(interp, scale_color(ms10, w10));
+    interp = add_color(interp, scale_color(ms11, w11));
+
+    return interp;
+}
 
 __device__ float sky_rayleigh_phase(const float cos_angle) {
   return 3.0f * (1.0f + cos_angle * cos_angle) / (16.0f * 3.1415926535f);
@@ -406,12 +463,16 @@ __device__ float sky_ozone_density(const float height) {
   if (!PARAMS.ozone_absorption)
     return 0.0f;
 
-  if (height > 25.0f) {
-    return PARAMS.base_density * expf(-0.07f * (height - 25.0f))/*fmaxf(0.0f, 1.0f - fabsf(height - 25.0f) * 0.04f)*/;
+#if 1
+  if (height > 20.0f) {
+    return PARAMS.base_density * expf(-0.07f * (height - 20.0f))/*fmaxf(0.0f, 1.0f - fabsf(height - 25.0f) * 0.04f)*/;
   }
   else {
-    return PARAMS.base_density * fmaxf(0.1f, 1.0f - fabsf(height - 25.0f) * 0.066666667f);
+    return PARAMS.base_density * fmaxf(0.1f, 1.0f - (20.0f - height) * 0.066666667f);
   }
+#else
+  return PARAMS.base_density * expf(-height * (1.0f / PARAMS.rayleigh_height_falloff));
+#endif
 }
 
 __device__ float sky_height(const vec3 point) {
@@ -564,9 +625,15 @@ __device__ RGBF sky_compute_atmosphere(const vec3 origin, const vec3 ray, const 
 
       const float shadow = sph_ray_hit_p0(ray_scatter, pos, SKY_EARTH_RADIUS) ? 0.0f : 1.0f;
 
-      const float scatter_distance = sph_ray_int_p0(ray_scatter, pos, SKY_ATMO_RADIUS);
-
-      const RGBF extinction_sun = sky_extinction(pos, ray_scatter, 0.0f, scatter_distance);
+      RGBF extinction_sun;
+      if (PARAMS.use_tm_lut) {
+        const float zenith_cos_angle = dot_product(normalize_vector(pos), ray_scatter);
+        const float2 tm_uv = sky_transmittance_lut_uv(height, zenith_cos_angle);
+        extinction_sun = sky_sample_tex(INT_PARAMS.tm_lut, tm_uv, SKY_TM_TEX_WIDTH, SKY_TM_TEX_HEIGHT);
+      } else {
+        const float scatter_distance = sph_ray_int_p0(ray_scatter, pos, SKY_ATMO_RADIUS);
+        extinction_sun = sky_extinction(pos, ray_scatter, 0.0f, scatter_distance);
+      }
 
       const float density_rayleigh = sky_rayleigh_density(height) * PARAMS.density_rayleigh;
       const float density_mie      = sky_mie_density(height) * PARAMS.density_mie;
@@ -593,32 +660,9 @@ __device__ RGBF sky_compute_atmosphere(const vec3 origin, const vec3 ray, const 
 
       if (PARAMS.use_ms) {
         const float sun_zenith_angle = dot_product(ray_scatter, normalize_vector(pos));
-
-        const float ms_x = fmaxf(0.0f, fminf(1.0f, sun_zenith_angle * 0.5f + 0.5f)) * (SKY_MS_TEX_SIZE - 1);
-        const float ms_y = fmaxf(0.0f, fminf(1.0f, height / SKY_ATMO_HEIGHT)) * (SKY_MS_TEX_SIZE - 1);
-
-        const int ms_ix = (int)(ms_x);
-        const int ms_iy = (int)(ms_y);
-
-        const int ms_ix1 = ms_ix + 1;
-        const int ms_iy1 = ms_iy + 1;
-
-        const RGBF ms00 = INT_PARAMS.ms_lut[ms_ix + ms_iy * SKY_MS_TEX_SIZE];
-        const RGBF ms01 = INT_PARAMS.ms_lut[ms_ix + ms_iy1 * SKY_MS_TEX_SIZE];
-        const RGBF ms10 = INT_PARAMS.ms_lut[ms_ix1 + ms_iy * SKY_MS_TEX_SIZE];
-        const RGBF ms11 = INT_PARAMS.ms_lut[ms_ix1 + ms_iy1 * SKY_MS_TEX_SIZE];
-
-        const float w00 = (ms_ix1 - ms_x) * (ms_iy1 - ms_y);
-        const float w01 = (ms_ix1 - ms_x) * (ms_y - ms_iy);
-        const float w10 = (ms_x - ms_ix) * (ms_iy1 - ms_y);
-        const float w11 = (ms_x - ms_ix) * (ms_y - ms_iy);
-
-        RGBF msInterp = scale_color(ms00, w00);
-        msInterp = add_color(msInterp, scale_color(ms01, w01));
-        msInterp = add_color(msInterp, scale_color(ms10, w10));
-        msInterp = add_color(msInterp, scale_color(ms11, w11));
-
-        msRadiance = mul_color(msInterp, scattering);
+        const float2 ms_uv = make_float2(sun_zenith_angle * 0.5f + 0.5f, height / SKY_ATMO_HEIGHT);
+        RGBF msTexResult = sky_sample_tex(INT_PARAMS.ms_lut, ms_uv, SKY_MS_TEX_SIZE, SKY_MS_TEX_SIZE);
+        msRadiance = mul_color(msTexResult, scattering);
       }
 
       const RGBF S = mul_color(sun_radiance, add_color(ssRadiance, msRadiance));
@@ -768,11 +812,18 @@ static msScatteringResult computeMultiScatteringIntegration(vec3 origin, vec3 ra
 
       const vec3 pos = add_vector(origin, scale_vector(ray, reach));
       const float light_angle = sample_sphere_solid_angle(INT_PARAMS.sun_pos, SKY_SUN_RADIUS, pos);
-
-      const float scatter_distance = sph_ray_int_p0(sun_dir, pos, SKY_ATMO_RADIUS);
-      const RGBF extinction_sun = sky_extinction(pos, sun_dir, 0.0f, scatter_distance);
-
       const float height = sky_height(pos);
+
+      RGBF extinction_sun;
+      if (PARAMS.use_tm_lut) {
+        const float zenith_cos_angle = dot_product(normalize_vector(pos), sun_dir);
+        const float2 tm_uv = sky_transmittance_lut_uv(height, zenith_cos_angle);
+        extinction_sun = sky_sample_tex(INT_PARAMS.tm_lut, tm_uv, SKY_TM_TEX_WIDTH, SKY_TM_TEX_HEIGHT);
+      } else {
+        const float scatter_distance = sph_ray_int_p0(sun_dir, pos, SKY_ATMO_RADIUS);
+        extinction_sun = sky_extinction(pos, sun_dir, 0.0f, scatter_distance);
+      }
+
       const float density_rayleigh = sky_rayleigh_density(height) * PARAMS.density_rayleigh;
       const float density_mie      = sky_mie_density(height) * PARAMS.density_mie;
       const float density_ozone    = sky_ozone_density(height) * PARAMS.density_ozone;
@@ -809,21 +860,21 @@ static msScatteringResult computeMultiScatteringIntegration(vec3 origin, vec3 ra
   return result;
 }
 
+
 #define saturatef(x) fmaxf(0.0f, fminf(1.0f, (x)))
 
 // Hillaire 2020
 static void computeMultiScattering(RGBF** msTex) {
-  if (*msTex) {
-    free(*msTex);
-  }
-
   *msTex = malloc(sizeof(RGBF) * SKY_MS_TEX_SIZE * SKY_MS_TEX_SIZE);
 
   #pragma omp parallel for
   for (int x = 0; x < SKY_MS_TEX_SIZE; x++) {
     for (int y = 0; y < SKY_MS_TEX_SIZE; y++) {
-      const float fx = ((float)x + 0.5f) / SKY_MS_TEX_SIZE;
-      const float fy = ((float)y + 0.5f) / SKY_MS_TEX_SIZE;
+      float fx = ((float)x + 0.5f) / SKY_MS_TEX_SIZE;
+      float fy = ((float)y + 0.5f) / SKY_MS_TEX_SIZE;
+
+      fx = fromSubUvsToUnit(fx, SKY_MS_TEX_SIZE);
+      fy = fromSubUvsToUnit(fy, SKY_MS_TEX_SIZE);
 
       float cos_angle = fx * 2.0f - 1.0f;
       vec3 sun_dir = get_vector(0.0f, cos_angle, -sinf(acosf(cos_angle)));
@@ -858,7 +909,75 @@ static void computeMultiScattering(RGBF** msTex) {
 
       RGBF L = scale_color(mul_color(inscatteredLuminance, multiScatteringContribution), PARAMS.ms_factor);
 
-      INT_PARAMS.ms_lut[x + y * SKY_MS_TEX_SIZE] = L;
+      (*msTex)[x + y * SKY_MS_TEX_SIZE] = L;
+    }
+  }
+}
+
+static RGBF computeTransmittanceOpticalDepth(float r, float mu) {
+  const int steps = 500;
+
+  // Distance to top of atmosphere
+  const float disc = r * r * (mu * mu - 1.0f) + SKY_ATMO_RADIUS * SKY_ATMO_RADIUS;
+  const float dist = fmaxf(-r * mu + sqrtf(fmaxf(0.0f, disc)), 0.0f);
+
+  const float step_size = dist / steps;
+
+  RGBF depth = get_color(0.0f, 0.0f, 0.0f);
+
+  for (int i = 0; i <= steps; i++) {
+    const float d_i = i * step_size;
+    const float r_i = sqrtf(d_i * d_i + 2.0f * r * mu * d_i + r * r);
+
+    const float density_rayleigh = sky_rayleigh_density(r_i - SKY_EARTH_RADIUS) * PARAMS.density_rayleigh;
+    const float density_mie      = sky_mie_density(r_i - SKY_EARTH_RADIUS) * PARAMS.density_mie;
+    const float density_ozone    = sky_ozone_density(r_i - SKY_EARTH_RADIUS) * PARAMS.density_ozone;
+
+    const RGBF extinction_rayleigh = scale_color(SKY_RAYLEIGH_EXTINCTION, density_rayleigh);
+    const RGBF extinction_mie = scale_color(SKY_MIE_EXTINCTION, density_mie);
+    const RGBF extinction_ozone = scale_color(SKY_OZONE_EXTINCTION, density_ozone);
+
+    const RGBF extinction = add_color(add_color(extinction_rayleigh, extinction_mie), extinction_ozone);
+
+    const float w = (i == 0 || i == steps) ? 0.5f : 1.0f;
+
+    depth = add_color(depth, scale_color(extinction, w * step_size));
+  }
+
+  return depth;
+}
+
+static void computeTransmittance(RGBF** tmTex) {
+  *tmTex = malloc(sizeof(RGBF) * SKY_TM_TEX_WIDTH * SKY_TM_TEX_HEIGHT);
+
+  for (int x = 0; x < SKY_TM_TEX_WIDTH; x++) {
+    for (int y = 0; y < SKY_TM_TEX_HEIGHT; y++) {
+      float fx = ((float)x + 0.5f) / SKY_TM_TEX_WIDTH;
+      float fy = ((float)y + 0.5f) / SKY_TM_TEX_HEIGHT;
+
+      fx = fromSubUvsToUnit(fx, SKY_TM_TEX_WIDTH);
+      fy = fromSubUvsToUnit(fy, SKY_TM_TEX_HEIGHT);
+
+      const float H = sqrtf(SKY_ATMO_RADIUS * SKY_ATMO_RADIUS - SKY_EARTH_RADIUS * SKY_EARTH_RADIUS);
+      const float rho = H * fy;
+      const float r = sqrtf(rho * rho + SKY_EARTH_RADIUS * SKY_EARTH_RADIUS);
+
+      const float d_min = SKY_ATMO_RADIUS - r;
+      const float d_max = rho + H;
+      const float d = d_min + fx * (d_max - d_min);
+
+      float mu = (d == 0.0f) ? 1.0f : (H * H - rho * rho - d * d) / (2.0f * r * d);
+
+      mu = fminf(1.0f, fmaxf(-1.0f, mu));
+
+      RGBF optical_depth = computeTransmittanceOpticalDepth(r, mu);
+
+      RGBF transmittance;
+      transmittance.r = expf(-optical_depth.r);
+      transmittance.g = expf(-optical_depth.g);
+      transmittance.b = expf(-optical_depth.b);
+
+      (*tmTex)[x + y * SKY_TM_TEX_WIDTH] = transmittance;
     }
   }
 }
@@ -914,11 +1033,17 @@ void renderPathTracer(  const skyPathTracerParams        model,
 
     printf("//    Ozone Absorption: (%e,%e,%e)\n", INT_PARAMS.ozone_absorption.r, INT_PARAMS.ozone_absorption.g, INT_PARAMS.ozone_absorption.b);
 
+    INT_PARAMS.tm_lut = (RGBF*)0;
+    if (PARAMS.use_tm_lut) {
+      computeTransmittance(&INT_PARAMS.tm_lut);
+      printf("//    TransmittanceLUT Done.\n");
+    }
+
     INT_PARAMS.ms_lut = (RGBF*)0;
     if (PARAMS.use_ms) {
       computeMultiScattering(&INT_PARAMS.ms_lut);
+      printf("//    MultiScatteringLUT Done.\n");
     }
-
   }
   printf("//\n");
 
@@ -947,5 +1072,9 @@ void renderPathTracer(  const skyPathTracerParams        model,
 
   if (PARAMS.use_ms) {
     free(INT_PARAMS.ms_lut);
+  }
+
+  if (PARAMS.use_tm_lut) {
+    free(INT_PARAMS.tm_lut);
   }
 }
