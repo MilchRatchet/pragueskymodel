@@ -30,7 +30,7 @@
 #define SKY_MOON_DISTANCE 384399.0f
 #define SKY_ATMO_HEIGHT 100.0f
 #define SKY_ATMO_RADIUS (SKY_ATMO_HEIGHT + SKY_EARTH_RADIUS)
-#define SKY_HEIGHT_OFFSET 0.001f
+#define SKY_HEIGHT_OFFSET 0.0005f
 
 //#define SKY_RAYLEIGH_SCATTERING get_color(5.8f * 0.001f, 13.558f * 0.001f, 33.1f * 0.001f)
 #define SKY_RAYLEIGH_SCATTERING INT_PARAMS.rayleigh_scattering
@@ -804,7 +804,8 @@ static msScatteringResult computeMultiScatteringIntegration(vec3 origin, vec3 ra
     float reach           = start + PARAMS.sampling_offset * step_size;
 
     const float cos_angle = dot_product(ray, sun_dir);
-    const float phase_uniform = 1.0f / (4.0f * PI);
+    const float phase_rayleigh = sky_rayleigh_phase(cos_angle);
+    const float phase_mie      = sky_mie_phase(cos_angle);
 
     RGBF transmittance = get_color(1.0f, 1.0f, 1.0f);
 
@@ -840,7 +841,7 @@ static msScatteringResult computeMultiScatteringIntegration(vec3 origin, vec3 ra
 
       const RGBF scattering = add_color(scattering_rayleigh, scattering_mie);
       const RGBF extinction = add_color(add_color(extinction_rayleigh, extinction_mie), extinction_ozone);
-      const RGBF phaseTimesScattering = scale_color(scattering, phase_uniform);
+      const RGBF phaseTimesScattering = add_color(scale_color(scattering_rayleigh, phase_rayleigh), scale_color(scattering_mie, phase_mie));
 
       const float shadow = sph_ray_hit_p0(sun_dir, pos, SKY_EARTH_RADIUS) ? 0.0f : 1.0f;
       const RGBF S = scale_color(mul_color(extinction_sun, phaseTimesScattering), shadow * light_angle);
