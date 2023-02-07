@@ -28,6 +28,8 @@ struct skyPathTracerParams {
     float ms_factor;
     int convertSpectrum;
     int use_tm_lut;
+    int ground;
+    float ground_albedo;
 } typedef skyPathTracerParams;
 
 void renderPathTracer(  const skyPathTracerParams        model,

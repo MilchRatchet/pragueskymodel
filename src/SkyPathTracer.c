@@ -56,6 +56,8 @@
 float fromUnitToSubUvs(float u, float resolution) { return (u + 0.5f / resolution) * (resolution / (resolution + 1.0f)); }
 float fromSubUvsToUnit(float u, float resolution) { return (u - 0.5f / resolution) * (resolution / (resolution - 1.0f)); }
 
+#define __saturatef(x) fmaxf(0.0f, fminf(1.0f, (x)))
+
 struct float2 {
     float x;
     float y;
@@ -683,7 +685,6 @@ __device__ RGBF sky_compute_atmosphere(const vec3 origin, const vec3 ray, const 
     }
   }
 
-
   const float sun_hit   = sphere_ray_intersection(ray, origin, INT_PARAMS.sun_pos, SKY_SUN_RADIUS);
   const float earth_hit = sph_ray_int_p0(ray, origin, SKY_EARTH_RADIUS);
 
@@ -700,6 +701,23 @@ __device__ RGBF sky_compute_atmosphere(const vec3 origin, const vec3 ray, const 
     S      = mul_color(S, limb_darkening);
 
     result = add_color(result, S);
+  } else if (0 && PARAMS.ground && earth_hit < FLT_MAX) {
+    // Turned off for single scattering because it looks ugly
+    const vec3 earth_hit_pos  = add_vector(origin, scale_vector(ray, earth_hit));
+    const float light_angle = sample_sphere_solid_angle(INT_PARAMS.sun_pos, SKY_SUN_RADIUS, earth_hit_pos);
+    const vec3 ray_scatter  = normalize_vector(sub_vector(INT_PARAMS.sun_pos, earth_hit_pos));
+    const float zenith_cos_angle = __saturatef(dot_product(normalize_vector(earth_hit_pos), ray_scatter));
+
+    RGBF extinction_sun;
+    if (PARAMS.use_tm_lut) {
+      const float2 tm_uv = sky_transmittance_lut_uv(0.0f, zenith_cos_angle);
+      extinction_sun = sky_sample_tex(INT_PARAMS.tm_lut, tm_uv, SKY_TM_TEX_WIDTH, SKY_TM_TEX_HEIGHT);
+    } else {
+      const float scatter_distance = sph_ray_int_p0(ray_scatter, earth_hit_pos, SKY_ATMO_RADIUS);
+      extinction_sun = sky_extinction(earth_hit_pos, ray_scatter, 0.0f, scatter_distance);
+    }
+
+    result = add_color(result, scale_color(mul_color(scale_color(INT_PARAMS.sun_color, PARAMS.sun_strength), mul_color(transmittance, extinction_sun)), PARAMS.ground_albedo * zenith_cos_angle * light_angle / PI));
   }
 
   return sky_convert_wavelengths_to_sRGB(result);
@@ -859,13 +877,31 @@ static msScatteringResult computeMultiScatteringIntegration(vec3 origin, vec3 ra
 
       transmittance = mul_color(transmittance, step_transmittance);
     }
+
+    const float sun_hit   = sphere_ray_intersection(ray, origin, INT_PARAMS.sun_pos, SKY_SUN_RADIUS);
+    const float earth_hit = sph_ray_int_p0(ray, origin, SKY_EARTH_RADIUS);
+
+    if (PARAMS.ground && earth_hit < sun_hit) {
+      const vec3 earth_hit_pos  = add_vector(origin, scale_vector(ray, earth_hit));
+      const float light_angle = sample_sphere_solid_angle(INT_PARAMS.sun_pos, SKY_SUN_RADIUS, earth_hit_pos);
+      const vec3 ray_scatter  = normalize_vector(sub_vector(INT_PARAMS.sun_pos, earth_hit_pos));
+      const float zenith_cos_angle = __saturatef(dot_product(normalize_vector(earth_hit_pos), ray_scatter));
+
+      RGBF extinction_sun;
+      if (PARAMS.use_tm_lut) {
+        const float2 tm_uv = sky_transmittance_lut_uv(0.0f, zenith_cos_angle);
+        extinction_sun = sky_sample_tex(INT_PARAMS.tm_lut, tm_uv, SKY_TM_TEX_WIDTH, SKY_TM_TEX_HEIGHT);
+      } else {
+        const float scatter_distance = sph_ray_int_p0(ray_scatter, earth_hit_pos, SKY_ATMO_RADIUS);
+        extinction_sun = sky_extinction(earth_hit_pos, ray_scatter, 0.0f, scatter_distance);
+      }
+
+      result.L = add_color(result.L, scale_color(mul_color(scale_color(INT_PARAMS.sun_color, PARAMS.sun_strength), mul_color(transmittance, extinction_sun)), PARAMS.ground_albedo * zenith_cos_angle * light_angle / PI));
+    }
   }
 
   return result;
 }
-
-
-#define saturatef(x) fmaxf(0.0f, fminf(1.0f, (x)))
 
 // Hillaire 2020
 static void computeMultiScattering(RGBF** msTex) {
@@ -882,7 +918,7 @@ static void computeMultiScattering(RGBF** msTex) {
 
       float cos_angle = fx * 2.0f - 1.0f;
       vec3 sun_dir = get_vector(0.0f, cos_angle, -sinf(acosf(cos_angle)));
-      float height = SKY_EARTH_RADIUS + saturatef(fy + SKY_HEIGHT_OFFSET) * (SKY_ATMO_HEIGHT - SKY_HEIGHT_OFFSET);
+      float height = SKY_EARTH_RADIUS + __saturatef(fy + SKY_HEIGHT_OFFSET) * (SKY_ATMO_HEIGHT - SKY_HEIGHT_OFFSET);
 
       vec3 pos = get_vector(0.0f, height, 0.0f);
 

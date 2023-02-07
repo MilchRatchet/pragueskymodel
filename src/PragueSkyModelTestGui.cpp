@@ -592,7 +592,7 @@ int main(int argc, char* argv[]) {
         static std::string loadError          = "";
         static std::string outputName         = "test.exr";
         static std::string outputPath         = "test.exr";
-        static int         resolution         = 270;
+        static int         resolution         = 500;
         static int         renderedResolution = resolution;
         static bool        rendered           = false;
         static bool        rendering          = false;
@@ -630,7 +630,9 @@ int main(int argc, char* argv[]) {
                 59.4f, /* Ground Visibility */
                 1.0f, /* Multiscattering Factor */
                 0, /* Convert Spectrum */
-                1 /* Use Transmittance LUT */
+                1, /* Use Transmittance LUT */
+                1, /* Ground */
+                0.3f /* Ground Albedo */
         };
 
         // Input window
@@ -917,6 +919,14 @@ int main(int argc, char* argv[]) {
             ImGui::SliderFloat("multiscattering factor", &ptParams.ms_factor, 0.0f, 2.0f, "%.3f");
             ImGui::Checkbox("convert spectrum to rgb", (bool*)&ptParams.convertSpectrum);
             ImGui::Checkbox("use transmittance lut", (bool*)&ptParams.use_tm_lut);
+            ImGui::Checkbox("ground", (bool*)&ptParams.ground);
+            if (!ptParams.ground) {
+                ImGui::BeginDisabled();
+            }
+            ImGui::SliderFloat("ground albedo", &ptParams.ground_albedo, 0.0f, 1.0f, "%.3f");
+            if (!ptParams.ground) {
+                ImGui::EndDisabled();
+            }
 
             ImGui::Dummy(ImVec2(0.0f, 1.0f));
             ImGui::Separator();
