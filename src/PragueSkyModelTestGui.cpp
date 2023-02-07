@@ -607,7 +607,7 @@ int main(int argc, char* argv[]) {
         static float       visibility         = 59.4f;
         static int         visibilityToLoad   = 0;
         static int         wavelength         = 280;
-        static float       zoom               = 4.0f;
+        static float       zoom               = 2.0f;
         static skyPathTracerParams ptParams   = {
                 1, /* OZONE_ABSORPTION */
                 40, /* SHADOW_STEPS */
@@ -632,7 +632,8 @@ int main(int argc, char* argv[]) {
                 0, /* Convert Spectrum */
                 1, /* Use Transmittance LUT */
                 1, /* Ground */
-                0.3f /* Ground Albedo */
+                0.3f, /* Ground Albedo */
+                1 /* Static Sun Solid Angle */
         };
 
         // Input window
@@ -927,6 +928,7 @@ int main(int argc, char* argv[]) {
             if (!ptParams.ground) {
                 ImGui::EndDisabled();
             }
+            ImGui::Checkbox("use static sun solid angle", (bool*)&ptParams.use_static_sun_solid_angle);
 
             ImGui::Dummy(ImVec2(0.0f, 1.0f));
             ImGui::Separator();

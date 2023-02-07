@@ -616,6 +616,12 @@ __device__ RGBF sky_compute_atmosphere(const vec3 origin, const vec3 ray, const 
 
     const RGBF sun_radiance = scale_color(INT_PARAMS.sun_color, PARAMS.sun_strength);
 
+    float light_angle;
+
+    if (PARAMS.use_static_sun_solid_angle) {
+      light_angle = sample_sphere_solid_angle(INT_PARAMS.sun_pos, SKY_SUN_RADIUS, origin);
+    }
+
     for (float i = 0; i < steps; i += 1.0f) {
       const float newReach = start + distance * (i + 0.3f) / steps;
       step_size = newReach - reach;
@@ -625,8 +631,10 @@ __device__ RGBF sky_compute_atmosphere(const vec3 origin, const vec3 ray, const 
 
       const float height = sky_height(pos);
 
-      const float light_angle = sample_sphere_solid_angle(INT_PARAMS.sun_pos, SKY_SUN_RADIUS, pos);
       const vec3 ray_scatter  = normalize_vector(sub_vector(INT_PARAMS.sun_pos, pos));
+      const float cos_angle = fmaxf(0.0f, dot_product(ray, ray_scatter));
+      const float phase_rayleigh = sky_rayleigh_phase(cos_angle);
+      const float phase_mie      = sky_mie_phase(cos_angle);
 
       const float shadow = sph_ray_hit_p0(ray_scatter, pos, SKY_EARTH_RADIUS) ? 0.0f : 1.0f;
 
@@ -644,11 +652,6 @@ __device__ RGBF sky_compute_atmosphere(const vec3 origin, const vec3 ray, const 
       const float density_mie      = sky_mie_density(height) * PARAMS.density_mie;
       const float density_ozone    = sky_ozone_density(height) * PARAMS.density_ozone;
 
-      const float cos_angle = fmaxf(0.0f, dot_product(ray, ray_scatter));
-
-      const float phase_rayleigh = sky_rayleigh_phase(cos_angle);
-      const float phase_mie      = sky_mie_phase(cos_angle);
-
       const RGBF scattering_rayleigh = scale_color(SKY_RAYLEIGH_SCATTERING, density_rayleigh);
       const RGBF scattering_mie = scale_color(SKY_MIE_SCATTERING, density_mie);
 
@@ -659,6 +662,10 @@ __device__ RGBF sky_compute_atmosphere(const vec3 origin, const vec3 ray, const 
       const RGBF scattering = add_color(scattering_rayleigh, scattering_mie);
       const RGBF extinction = add_color(add_color(extinction_rayleigh, extinction_mie), extinction_ozone);
       const RGBF phaseTimesScattering = add_color(scale_color(scattering_rayleigh, phase_rayleigh), scale_color(scattering_mie, phase_mie));
+
+      if (!PARAMS.use_static_sun_solid_angle) {
+        light_angle = sample_sphere_solid_angle(INT_PARAMS.sun_pos, SKY_SUN_RADIUS, pos);
+      }
 
       const RGBF ssRadiance = scale_color(mul_color(extinction_sun, phaseTimesScattering), shadow * light_angle);
       RGBF msRadiance = get_color(0.0f, 0.0f, 0.0f);
@@ -821,9 +828,11 @@ static msScatteringResult computeMultiScatteringIntegration(vec3 origin, vec3 ra
     float step_size       = distance / steps;
     float reach           = start + PARAMS.sampling_offset * step_size;
 
+    const float light_angle = sample_sphere_solid_angle(INT_PARAMS.sun_pos, SKY_SUN_RADIUS, origin);
     const float cos_angle = dot_product(ray, sun_dir);
     const float phase_rayleigh = sky_rayleigh_phase(cos_angle);
     const float phase_mie      = sky_mie_phase(cos_angle);
+    const float zenith_cos_angle = dot_product(normalize_vector(origin), sun_dir);
 
     RGBF transmittance = get_color(1.0f, 1.0f, 1.0f);
 
@@ -833,12 +842,10 @@ static msScatteringResult computeMultiScatteringIntegration(vec3 origin, vec3 ra
       reach = newReach;
 
       const vec3 pos = add_vector(origin, scale_vector(ray, reach));
-      const float light_angle = sample_sphere_solid_angle(INT_PARAMS.sun_pos, SKY_SUN_RADIUS, pos);
       const float height = sky_height(pos);
 
       RGBF extinction_sun;
       if (PARAMS.use_tm_lut) {
-        const float zenith_cos_angle = dot_product(normalize_vector(pos), sun_dir);
         const float2 tm_uv = sky_transmittance_lut_uv(height, zenith_cos_angle);
         extinction_sun = sky_sample_tex(INT_PARAMS.tm_lut, tm_uv, SKY_TM_TEX_WIDTH, SKY_TM_TEX_HEIGHT);
       } else {
@@ -990,6 +997,7 @@ static RGBF computeTransmittanceOpticalDepth(float r, float mu) {
 static void computeTransmittance(RGBF** tmTex) {
   *tmTex = malloc(sizeof(RGBF) * SKY_TM_TEX_WIDTH * SKY_TM_TEX_HEIGHT);
 
+  #pragma omp parallel for
   for (int x = 0; x < SKY_TM_TEX_WIDTH; x++) {
     for (int y = 0; y < SKY_TM_TEX_HEIGHT; y++) {
       float fx = ((float)x + 0.5f) / SKY_TM_TEX_WIDTH;

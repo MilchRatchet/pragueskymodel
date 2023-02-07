@@ -30,6 +30,7 @@ struct skyPathTracerParams {
     int use_tm_lut;
     int ground;
     float ground_albedo;
+    int use_static_sun_solid_angle;
 } typedef skyPathTracerParams;
 
 void renderPathTracer(  const skyPathTracerParams        model,
