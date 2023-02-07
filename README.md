@@ -1,3 +1,7 @@
+# Fork
+
+This fork includes an implementation of an atmosphere renderer I wrote with goal of improving the atmosphere rendering in [Luminary](https://github.com/MilchRatchet/Luminary). I changed the UI so that I can compare my implementation with this model. The result is not perfect but I am not sure whether the remaining error is my fault or due to the nature of the method. Unfortunately, I don't have an implementation of the Hillaire2020 model in this.
+
 # Prague Sky Model
 
 This a C++ implementation of a sky model developed at Charles University in Prague and described in
@@ -36,7 +40,7 @@ The model is provided together with a simple renderer that demonstrates its usag
     - Apache-2.0 license file
 - `README.md`
     - this readme
-    
+
 ## Requirements
 
 C++ 17 is required. GUI version also requires DirectX 11 on Windows and SDL 2 with OpenGL 2 on Linux. Both CLI and GUI versions require TBB on Linux.
