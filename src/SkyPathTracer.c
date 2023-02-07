@@ -38,7 +38,7 @@
 #define SKY_OZONE_SCATTERING 0.0f
 
 #define SKY_RAYLEIGH_EXTINCTION SKY_RAYLEIGH_SCATTERING
-#define SKY_MIE_EXTINCTION scale_color(SKY_MIE_SCATTERING, 1.11f)
+#define SKY_MIE_EXTINCTION get_color(4.440f * 0.001f, 4.440f * 0.001f, 4.440f * 0.001f)
 //#define SKY_OZONE_EXTINCTION get_color(0.65f * 0.001f, 1.881f * 0.001f, 0.085f * 0.001f)
 #define SKY_OZONE_EXTINCTION INT_PARAMS.ozone_absorption
 
@@ -463,13 +463,16 @@ __device__ float sky_ozone_density(const float height) {
   if (!PARAMS.ozone_absorption)
     return 0.0f;
 
-#if 1
+#if 0
   if (height > 20.0f) {
     return PARAMS.base_density * expf(-0.07f * (height - 20.0f))/*fmaxf(0.0f, 1.0f - fabsf(height - 25.0f) * 0.04f)*/;
   }
   else {
     return PARAMS.base_density * fmaxf(0.1f, 1.0f - (20.0f - height) * 0.066666667f);
   }
+#elif 1
+  const float min_val = (height > 20.0f) ? 0.0f : 0.1f;
+  return PARAMS.base_density * fmaxf(min_val, 1.0f - fabsf(height - 20.0f) / 10.0f);
 #else
   return PARAMS.base_density * expf(-height * (1.0f / PARAMS.rayleigh_height_falloff));
 #endif
