@@ -808,7 +808,7 @@ struct msScatteringResult {
   RGBF multiScatterAs1;
 } typedef msScatteringResult;
 
-static msScatteringResult computeMultiScatteringIntegration(vec3 origin, vec3 ray, vec3 sun_dir) {
+static msScatteringResult computeMultiScatteringIntegration(vec3 origin, vec3 ray, vec3 sun_pos) {
   msScatteringResult result;
 
   result.L = get_color(0.0f, 0.0f, 0.0f);
@@ -829,10 +829,6 @@ static msScatteringResult computeMultiScatteringIntegration(vec3 origin, vec3 ra
     float reach           = start + PARAMS.sampling_offset * step_size;
 
     const float light_angle = sample_sphere_solid_angle(INT_PARAMS.sun_pos, SKY_SUN_RADIUS, origin);
-    const float cos_angle = dot_product(ray, sun_dir);
-    const float phase_rayleigh = sky_rayleigh_phase(cos_angle);
-    const float phase_mie      = sky_mie_phase(cos_angle);
-    const float zenith_cos_angle = dot_product(normalize_vector(origin), sun_dir);
 
     RGBF transmittance = get_color(1.0f, 1.0f, 1.0f);
 
@@ -844,13 +840,19 @@ static msScatteringResult computeMultiScatteringIntegration(vec3 origin, vec3 ra
       const vec3 pos = add_vector(origin, scale_vector(ray, reach));
       const float height = sky_height(pos);
 
+      const vec3 ray_scatter  = normalize_vector(sub_vector(sun_pos, pos));
+      const float cos_angle = dot_product(ray, ray_scatter);
+      const float phase_rayleigh = sky_rayleigh_phase(cos_angle);
+      const float phase_mie      = sky_mie_phase(cos_angle);
+      const float zenith_cos_angle = dot_product(normalize_vector(origin), ray_scatter);
+
       RGBF extinction_sun;
       if (PARAMS.use_tm_lut) {
         const float2 tm_uv = sky_transmittance_lut_uv(height, zenith_cos_angle);
         extinction_sun = sky_sample_tex(INT_PARAMS.tm_lut, tm_uv, SKY_TM_TEX_WIDTH, SKY_TM_TEX_HEIGHT);
       } else {
-        const float scatter_distance = sph_ray_int_p0(sun_dir, pos, SKY_ATMO_RADIUS);
-        extinction_sun = sky_extinction(pos, sun_dir, 0.0f, scatter_distance);
+        const float scatter_distance = sph_ray_int_p0(ray_scatter, pos, SKY_ATMO_RADIUS);
+        extinction_sun = sky_extinction(pos, ray_scatter, 0.0f, scatter_distance);
       }
 
       const float density_rayleigh = sky_rayleigh_density(height) * PARAMS.density_rayleigh;
@@ -868,7 +870,7 @@ static msScatteringResult computeMultiScatteringIntegration(vec3 origin, vec3 ra
       const RGBF extinction = add_color(add_color(extinction_rayleigh, extinction_mie), extinction_ozone);
       const RGBF phaseTimesScattering = add_color(scale_color(scattering_rayleigh, phase_rayleigh), scale_color(scattering_mie, phase_mie));
 
-      const float shadow = sph_ray_hit_p0(sun_dir, pos, SKY_EARTH_RADIUS) ? 0.0f : 1.0f;
+      const float shadow = sph_ray_hit_p0(ray_scatter, pos, SKY_EARTH_RADIUS) ? 0.0f : 1.0f;
       const RGBF S = scale_color(mul_color(extinction_sun, phaseTimesScattering), shadow * light_angle);
 
       RGBF step_transmittance;
@@ -885,13 +887,13 @@ static msScatteringResult computeMultiScatteringIntegration(vec3 origin, vec3 ra
       transmittance = mul_color(transmittance, step_transmittance);
     }
 
-    const float sun_hit   = sphere_ray_intersection(ray, origin, INT_PARAMS.sun_pos, SKY_SUN_RADIUS);
+    const float sun_hit   = sphere_ray_intersection(ray, origin, sun_pos, SKY_SUN_RADIUS);
     const float earth_hit = sph_ray_int_p0(ray, origin, SKY_EARTH_RADIUS);
 
     if (PARAMS.ground && earth_hit < sun_hit) {
       const vec3 earth_hit_pos  = add_vector(origin, scale_vector(ray, earth_hit));
-      const float light_angle = sample_sphere_solid_angle(INT_PARAMS.sun_pos, SKY_SUN_RADIUS, earth_hit_pos);
-      const vec3 ray_scatter  = normalize_vector(sub_vector(INT_PARAMS.sun_pos, earth_hit_pos));
+      const float light_angle = sample_sphere_solid_angle(sun_pos, SKY_SUN_RADIUS, earth_hit_pos);
+      const vec3 ray_scatter  = normalize_vector(sub_vector(sun_pos, earth_hit_pos));
       const float zenith_cos_angle = __saturatef(dot_product(normalize_vector(earth_hit_pos), ray_scatter));
 
       RGBF extinction_sun;
@@ -932,6 +934,8 @@ static void computeMultiScattering(RGBF** msTex) {
       RGBF inscatteredLuminance = get_color(0.0f, 0.0f, 0.0f);
       RGBF multiScattering = get_color(0.0f, 0.0f, 0.0f);
 
+      const vec3 sun_pos = scale_vector(sun_dir, SKY_SUN_DISTANCE);
+
       const float sqrt_sample = 8.0f;
 
       for (int i = 0; i < 64; i++) {
@@ -943,7 +947,7 @@ static void computeMultiScattering(RGBF** msTex) {
         float phi = acosf(1.0f - 2.0f * randB);
         vec3 ray = angles_to_direction(phi, theta);
 
-        msScatteringResult result = computeMultiScatteringIntegration(pos, ray, sun_dir);
+        msScatteringResult result = computeMultiScatteringIntegration(pos, ray, sun_pos);
 
         inscatteredLuminance = add_color(inscatteredLuminance, result.L);
         multiScattering = add_color(multiScattering, result.multiScatterAs1);
