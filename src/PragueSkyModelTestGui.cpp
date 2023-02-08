@@ -612,7 +612,7 @@ int main(int argc, char* argv[]) {
                 1, /* OZONE_ABSORPTION */
                 40, /* SHADOW_STEPS */
                 1.0f, /* BASE_DENSITY */
-                25.0f, /* SUN_STRENGTH */
+                10.0f, /* SUN_STRENGTH */
                 40, /* STEPS */
                 0, /* USE CS MIE */
                 0.8f, /* MIE G */
@@ -621,9 +621,9 @@ int main(int argc, char* argv[]) {
                 1.0f, /* Ozone Density*/
                 8.0f, /* Rayleigh Falloff */
                 1.7f, /* Mie Falloff */
-                680.0f, /* Wavelength Red */
+                635.0f, /* Wavelength Red */
                 550.0f, /* Wavelength Green */
-                440.0f, /* Wavelength Blue */
+                415.0f, /* Wavelength Blue */
                 0.03f, /* Carbondioxide Percent */
                 1, /* Use Multiscattering */
                 59.4f, /* Ground Visibility */

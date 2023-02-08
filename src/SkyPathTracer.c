@@ -709,10 +709,6 @@ __device__ sRGBF sky_convert_wavelengths_to_sRGB(RGBF radiance) {
     y += CieColorMatchingFunctionTableValue(INT_PARAMS.wavelengths.v[i], 2) * radiance.v[i];
     z += CieColorMatchingFunctionTableValue(INT_PARAMS.wavelengths.v[i], 3) * radiance.v[i];
   }
-
-  x *= 0.5f;
-  y *= 0.5f;
-  z *= 0.5f;
 #else
   float step_size = 1.0f;
   for (float lambda = SKY_WAVELENGTH_MIN; lambda < SKY_WAVELENGTH_MAX; lambda += step_size) {
@@ -1214,6 +1210,15 @@ void renderPathTracer(  const skyPathTracerParams        model,
       INT_PARAMS.rayleigh_scattering.v[i] = computeRayleighScattering(INT_PARAMS.wavelengths.v[i]);
       INT_PARAMS.ozone_absorption.v[i] = computeOzoneAbsorption(INT_PARAMS.wavelengths.v[i]);
     }
+
+    printf("//    Wavelengths:          (");
+    for (int i = 0; i < SKY_SPECTRUM_N; i++) {
+      printf("%e", INT_PARAMS.wavelengths.v[i]);
+      if (i != SKY_SPECTRUM_N - 1) {
+        printf(",");
+      }
+    }
+    printf(")\n");
 
     printf("//    Sun Color:           (");
     for (int i = 0; i < SKY_SPECTRUM_N; i++) {
