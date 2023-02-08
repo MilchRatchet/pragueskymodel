@@ -31,6 +31,7 @@ struct skyPathTracerParams {
     int ground;
     float ground_albedo;
     int use_static_sun_solid_angle;
+    float ozone_layer_thickness;
 } typedef skyPathTracerParams;
 
 void renderPathTracer(  const skyPathTracerParams        model,

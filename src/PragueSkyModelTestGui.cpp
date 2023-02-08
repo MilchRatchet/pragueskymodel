@@ -633,7 +633,8 @@ int main(int argc, char* argv[]) {
                 1, /* Use Transmittance LUT */
                 1, /* Ground */
                 0.3f, /* Ground Albedo */
-                1 /* Static Sun Solid Angle */
+                1, /* Static Sun Solid Angle */
+                15.0f /* Ozone Layer Thickness */
         };
 
         // Input window
@@ -929,6 +930,7 @@ int main(int argc, char* argv[]) {
                 ImGui::EndDisabled();
             }
             ImGui::Checkbox("use static sun solid angle", (bool*)&ptParams.use_static_sun_solid_angle);
+            ImGui::SliderFloat("ozone layer thickness", &ptParams.ozone_layer_thickness, 0.1f, 25.0f, "%.1f km");
 
             ImGui::Dummy(ImVec2(0.0f, 1.0f));
             ImGui::Separator();

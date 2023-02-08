@@ -474,7 +474,7 @@ __device__ float sky_ozone_density(const float height) {
   }
 #elif 1
   const float min_val = (height > 20.0f) ? 0.0f : 0.1f;
-  return PARAMS.base_density * fmaxf(min_val, 1.0f - fabsf(height - 20.0f) / 10.0f);
+  return PARAMS.base_density * fmaxf(min_val, 1.0f - fabsf(height - 25.0f) / PARAMS.ozone_layer_thickness);
 #else
   return PARAMS.base_density * expf(-height * (1.0f / PARAMS.rayleigh_height_falloff));
 #endif
