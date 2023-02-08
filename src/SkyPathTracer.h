@@ -22,7 +22,6 @@ struct skyPathTracerParams {
     float wavelength_green;
     float wavelength_blue;
     float carbondioxide_percent;
-    float sampling_offset;
     int use_ms;
     float ground_visibility;
     float ms_factor;
