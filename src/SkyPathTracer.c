@@ -49,6 +49,9 @@
 #define SKY_TM_TEX_WIDTH 256
 #define SKY_TM_TEX_HEIGHT 64
 
+#define SKY_USE_WIDE_SPECTRUM 0
+#define SKY_SPECTRUM_N 8
+
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
 //  Math Helper Section
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -69,11 +72,25 @@ struct vec3 {
   float z;
 } typedef vec3;
 
+#if SKY_USE_WIDE_SPECTRUM
+struct RGBF {
+  float v[SKY_SPECTRUM_N];
+} typedef RGBF;
+struct sRGBF {
+  float r;
+  float g;
+  float b;
+} typedef sRGBF;
+#else
 struct RGBF {
   float r;
   float g;
   float b;
 } typedef RGBF;
+#define sRGBF RGBF
+#endif
+
+
 
 __device__ float2 make_float2(const float a, const float b) {
     float2 result;
@@ -142,6 +159,78 @@ __device__ vec3 normalize_vector(vec3 vector) {
   return vector;
 }
 
+#if SKY_USE_WIDE_SPECTRUM
+__device__ RGBF get_color(const float r, const float g, const float b) {
+  RGBF result;
+
+  // For wide spectrum we only allow a broadcast all operation
+  for (int i = 0; i < SKY_SPECTRUM_N; i++) {
+    result.v[i] = r;
+  }
+
+  return result;
+}
+
+__device__ RGBF add_color(const RGBF a, const RGBF b) {
+  RGBF result;
+
+  for (int i = 0; i < SKY_SPECTRUM_N; i++) {
+    result.v[i] = a.v[i] + b.v[i];
+  }
+
+  return result;
+}
+
+__device__ RGBF sub_color(const RGBF a, const RGBF b) {
+  RGBF result;
+
+  for (int i = 0; i < SKY_SPECTRUM_N; i++) {
+    result.v[i] = a.v[i] - b.v[i];
+  }
+
+  return result;
+}
+
+__device__ RGBF scale_color(const RGBF a, const float b) {
+  RGBF result;
+
+  for (int i = 0; i < SKY_SPECTRUM_N; i++) {
+    result.v[i] = a.v[i] * b;
+  }
+
+  return result;
+}
+
+__device__ RGBF mul_color(const RGBF a, const RGBF b) {
+  RGBF result;
+
+  for (int i = 0; i < SKY_SPECTRUM_N; i++) {
+    result.v[i] = a.v[i] * b.v[i];
+  }
+
+  return result;
+}
+
+__device__ RGBF inv_color(const RGBF a) {
+  RGBF result;
+
+  for (int i = 0; i < SKY_SPECTRUM_N; i++) {
+    result.v[i] = 1.0f / a.v[i];
+  }
+
+  return result;
+}
+
+__device__ RGBF exp_color(const RGBF a) {
+  RGBF result;
+
+  for (int i = 0; i < SKY_SPECTRUM_N; i++) {
+    result.v[i] = expf(a.v[i]);
+  }
+
+  return result;
+}
+#else
 __device__ RGBF get_color(const float r, const float g, const float b) {
   RGBF result;
 
@@ -201,6 +290,19 @@ __device__ RGBF inv_color(const RGBF a) {
 
   return result;
 }
+
+__device__ RGBF exp_color(const RGBF a) {
+  RGBF result;
+
+  result.r = expf(a.r);
+  result.g = expf(a.g);
+  result.b = expf(a.b);
+
+  return result;
+}
+#endif
+
+
 
 /*
  * Computes the distance to the first intersection of a ray with a sphere. To check for any hit use sphere_ray_hit.
@@ -364,6 +466,9 @@ struct skyInternalParams {
   RGBF ozone_absorption;
   RGBF* ms_lut;
   RGBF* tm_lut;
+#if SKY_USE_WIDE_SPECTRUM
+  RGBF wavelengths;
+#endif
 } typedef skyInternalParams;
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -437,7 +542,7 @@ __device__ float sky_mie_phase(const float cos_angle) {
 }
 
 __device__ float sky_rayleigh_density(const float height) {
-  return PARAMS.base_density * expf(-height * (1.0f / PARAMS.rayleigh_height_falloff));
+  return 2.5f * PARAMS.base_density * expf(-height * (1.0f / PARAMS.rayleigh_height_falloff));
 }
 
 __device__ float sky_mie_density(const float height) {
@@ -513,7 +618,9 @@ __device__ RGBF sky_extinction(const vec3 origin, const vec3 ray, const float st
     density = add_color(density, scale_color(D, step_size));
   }
 
-  return get_color(expf(-density.r), expf(-density.g), expf(-density.b));
+  density = scale_color(density, -1.0f);
+
+  return exp_color(density);
 }
 
 /*
@@ -549,6 +656,20 @@ __device__ float2 sky_compute_path(const vec3 origin, const vec3 ray, const floa
 
 // assumes that wavelengths are sorted with blue lowest, red highest
 static float sky_interpolate_radiance_at_wavelength(RGBF radiance, float wavelength) {
+#if SKY_USE_WIDE_SPECTRUM
+  if (wavelength < INT_PARAMS.wavelengths.v[0]) {
+    return radiance.v[0];
+  }
+
+  for (int i = 1; i < SKY_SPECTRUM_N; i++) {
+    if (wavelength < INT_PARAMS.wavelengths.v[i]) {
+      float u = (wavelength - INT_PARAMS.wavelengths.v[i - 1]) / (INT_PARAMS.wavelengths.v[i] - INT_PARAMS.wavelengths.v[i - 1]);
+      return radiance.v[i] * u + radiance.v[i - 1] * (1.0f - u);
+    }
+  }
+
+  return radiance.v[SKY_SPECTRUM_N - 1];
+#else
   if (wavelength < PARAMS.wavelength_blue) {
     return radiance.b;
   }
@@ -564,44 +685,62 @@ static float sky_interpolate_radiance_at_wavelength(RGBF radiance, float wavelen
   }
 
   return radiance.r;
+#endif
+
 }
 
 // Conversion of spectrum to sRGB as in Bruneton2017
 // https://github.com/ebruneton/precomputed_atmospheric_scattering
-__device__ RGBF sky_convert_wavelengths_to_sRGB(RGBF radiance) {
+__device__ sRGBF sky_convert_wavelengths_to_sRGB(RGBF radiance) {
+#if !SKY_USE_WIDE_SPECTRUM
   if (!PARAMS.convertSpectrum) {
     return radiance;
   }
+#endif
 
   float x = 0.0f;
   float y = 0.0f;
   float z = 0.0f;
-  float step_size = 1.0f;
 
+#if SKY_USE_WIDE_SPECTRUM
+  const float step_size = INT_PARAMS.wavelengths.v[1] - INT_PARAMS.wavelengths.v[0];
+  for (int i = 0; i < SKY_SPECTRUM_N; i++) {
+    x += CieColorMatchingFunctionTableValue(INT_PARAMS.wavelengths.v[i], 1) * radiance.v[i];
+    y += CieColorMatchingFunctionTableValue(INT_PARAMS.wavelengths.v[i], 2) * radiance.v[i];
+    z += CieColorMatchingFunctionTableValue(INT_PARAMS.wavelengths.v[i], 3) * radiance.v[i];
+  }
+
+  x *= 0.5f;
+  y *= 0.5f;
+  z *= 0.5f;
+#else
+  float step_size = 1.0f;
   for (float lambda = SKY_WAVELENGTH_MIN; lambda < SKY_WAVELENGTH_MAX; lambda += step_size) {
     const float v = sky_interpolate_radiance_at_wavelength(radiance, lambda);
     x += CieColorMatchingFunctionTableValue(lambda, 1) * v;
     y += CieColorMatchingFunctionTableValue(lambda, 2) * v;
     z += CieColorMatchingFunctionTableValue(lambda, 3) * v;
   }
+  x *= /*683.0f*/ step_size / (SKY_WAVELENGTH_MAX - SKY_WAVELENGTH_MIN);
+  y *= /*683.0f*/ step_size / (SKY_WAVELENGTH_MAX - SKY_WAVELENGTH_MIN);
+  z *= /*683.0f*/ step_size / (SKY_WAVELENGTH_MAX - SKY_WAVELENGTH_MIN);
+#endif
 
-  const float MAX_LUMINOUS_EFFICACY = /*683.0f*/ 1.0f / (SKY_WAVELENGTH_MAX - SKY_WAVELENGTH_MIN);
-
-  RGBF result;
-  result.r = MAX_LUMINOUS_EFFICACY * step_size * (3.2406f * x - 1.5372f * y - 0.4986f * z);
-  result.g = MAX_LUMINOUS_EFFICACY * step_size * (-0.9689f * x + 1.8758f * y + 0.0415f * z);
-  result.b = MAX_LUMINOUS_EFFICACY * step_size * (0.0557f * x - 0.2040f * y + 1.0570f * z);
+  sRGBF result;
+  result.r = 3.2406f * x - 1.5372f * y - 0.4986f * z;
+  result.g = -0.9689f * x + 1.8758f * y + 0.0415f * z;
+  result.b = 0.0557f * x - 0.2040f * y + 1.0570f * z;
 
   return result;
 }
 
-__device__ RGBF sky_compute_atmosphere(const vec3 origin, const vec3 ray, const float limit) {
+__device__ sRGBF sky_compute_atmosphere(const vec3 origin, const vec3 ray, const float limit) {
   RGBF result = get_color(0.0f, 0.0f, 0.0f);
 
   float2 path = sky_compute_path(origin, ray, SKY_EARTH_RADIUS, SKY_ATMO_RADIUS);
 
   if (path.y == -FLT_MAX) {
-    return result;
+    return sky_convert_wavelengths_to_sRGB(result);
   }
 
   const float start    = path.x;
@@ -679,10 +818,9 @@ __device__ RGBF sky_compute_atmosphere(const vec3 origin, const vec3 ray, const 
 
       const RGBF S = mul_color(sun_radiance, add_color(ssRadiance, msRadiance));
 
-      RGBF step_transmittance;
-      step_transmittance.r = expf(-step_size * extinction.r);
-      step_transmittance.g = expf(-step_size * extinction.g);
-      step_transmittance.b = expf(-step_size * extinction.b);
+      RGBF step_transmittance = extinction;
+      step_transmittance = scale_color(step_transmittance, -step_size);
+      step_transmittance = exp_color(step_transmittance);
 
       const RGBF Sint = mul_color(sub_color(S, mul_color(S, step_transmittance)), inv_color(extinction));
 
@@ -696,6 +834,7 @@ __device__ RGBF sky_compute_atmosphere(const vec3 origin, const vec3 ray, const 
   const float earth_hit = sph_ray_int_p0(ray, origin, SKY_EARTH_RADIUS);
 
   if (earth_hit > sun_hit) {
+#if !SKY_USE_WIDE_SPECTRUM
     const vec3 sun_hit_pos  = add_vector(origin, scale_vector(ray, sun_hit));
     const float limb_factor = 1.0f + dot_product(normalize_vector(sub_vector(sun_hit_pos, INT_PARAMS.sun_pos)), ray);
     const float mu          = sqrtf(1.0f - limb_factor * limb_factor);
@@ -708,6 +847,7 @@ __device__ RGBF sky_compute_atmosphere(const vec3 origin, const vec3 ray, const 
     S      = mul_color(S, limb_darkening);
 
     result = add_color(result, S);
+#endif
   } else if (0 && PARAMS.ground && earth_hit < FLT_MAX) {
     // Turned off for single scattering because it looks ugly
     const vec3 earth_hit_pos  = add_vector(origin, scale_vector(ray, earth_hit));
@@ -873,10 +1013,9 @@ static msScatteringResult computeMultiScatteringIntegration(vec3 origin, vec3 ra
       const float shadow = sph_ray_hit_p0(ray_scatter, pos, SKY_EARTH_RADIUS) ? 0.0f : 1.0f;
       const RGBF S = scale_color(mul_color(extinction_sun, phaseTimesScattering), shadow * light_angle);
 
-      RGBF step_transmittance;
-      step_transmittance.r = expf(-step_size * extinction.r);
-      step_transmittance.g = expf(-step_size * extinction.g);
-      step_transmittance.b = expf(-step_size * extinction.b);
+      RGBF step_transmittance = extinction;
+      step_transmittance = scale_color(step_transmittance, -step_size);
+      step_transmittance = exp_color(step_transmittance);
 
       const RGBF ssInt = mul_color(sub_color(S, mul_color(S, step_transmittance)), inv_color(extinction));
       const RGBF msInt = mul_color(sub_color(scattering, mul_color(scattering, step_transmittance)), inv_color(extinction));
@@ -926,7 +1065,7 @@ static void computeMultiScattering(RGBF** msTex) {
       fy = fromSubUvsToUnit(fy, SKY_MS_TEX_SIZE);
 
       float cos_angle = fx * 2.0f - 1.0f;
-      vec3 sun_dir = get_vector(0.0f, cos_angle, -sinf(acosf(cos_angle)));
+      vec3 sun_dir = get_vector(0.0f, cos_angle, sqrtf(__saturatef(1.0f - cos_angle * cos_angle)));
       float height = SKY_EARTH_RADIUS + __saturatef(fy + SKY_HEIGHT_OFFSET) * (SKY_ATMO_HEIGHT - SKY_HEIGHT_OFFSET);
 
       vec3 pos = get_vector(0.0f, height, 0.0f);
@@ -1024,10 +1163,7 @@ static void computeTransmittance(RGBF** tmTex) {
 
       RGBF optical_depth = computeTransmittanceOpticalDepth(r, mu);
 
-      RGBF transmittance;
-      transmittance.r = expf(-optical_depth.r);
-      transmittance.g = expf(-optical_depth.g);
-      transmittance.b = expf(-optical_depth.b);
+      RGBF transmittance = exp_color(scale_color(optical_depth, -1.0f));
 
       (*tmTex)[x + y * SKY_TM_TEX_WIDTH] = transmittance;
     }
@@ -1052,7 +1188,7 @@ void renderPathTracer(  const skyPathTracerParams        model,
 
   *outResult = malloc(sizeof(float) * resolution * resolution * 3);
 
-  RGBF* dst = (RGBF*) *outResult;
+  sRGBF* dst = (sRGBF*) *outResult;
 
   PARAMS = model;
 
@@ -1061,17 +1197,54 @@ void renderPathTracer(  const skyPathTracerParams        model,
   printf("//  Path Tracer Data:\n");
   printf("//\n");
   {
-    //get_color(1.474f, 1.8504f, 1.91198f);
-    INT_PARAMS.sun_color.r = sunRadianceAtWavelength(PARAMS.wavelength_red);
-    INT_PARAMS.sun_color.g = sunRadianceAtWavelength(PARAMS.wavelength_green);
-    INT_PARAMS.sun_color.b = sunRadianceAtWavelength(PARAMS.wavelength_blue);
-
     vec3 sun_pos = angles_to_direction(elevation, azimuth);
     sun_pos = normalize_vector(sun_pos);
     sun_pos = scale_vector(sun_pos, SKY_SUN_DISTANCE);
     sun_pos.y -= SKY_EARTH_RADIUS;
 
     INT_PARAMS.sun_pos = sun_pos;
+#if SKY_USE_WIDE_SPECTRUM
+    //get_color(1.474f, 1.8504f, 1.91198f);
+    for (int i = 0; i < SKY_SPECTRUM_N; i++) {
+      INT_PARAMS.wavelengths.v[i] = PARAMS.wavelength_blue + i * (PARAMS.wavelength_red - PARAMS.wavelength_blue) / (SKY_SPECTRUM_N - 1);
+    }
+
+    for (int i = 0; i < SKY_SPECTRUM_N; i++) {
+      INT_PARAMS.sun_color.v[i] = sunRadianceAtWavelength(INT_PARAMS.wavelengths.v[i]);
+      INT_PARAMS.rayleigh_scattering.v[i] = computeRayleighScattering(INT_PARAMS.wavelengths.v[i]);
+      INT_PARAMS.ozone_absorption.v[i] = computeOzoneAbsorption(INT_PARAMS.wavelengths.v[i]);
+    }
+
+    printf("//    Sun Color:           (");
+    for (int i = 0; i < SKY_SPECTRUM_N; i++) {
+      printf("%e", INT_PARAMS.sun_color.v[i]);
+      if (i != SKY_SPECTRUM_N - 1) {
+        printf(",");
+      }
+    }
+    printf(")\n");
+
+    printf("//    Rayleigh Scattering: (");
+    for (int i = 0; i < SKY_SPECTRUM_N; i++) {
+      printf("%e", INT_PARAMS.rayleigh_scattering.v[i]);
+      if (i != SKY_SPECTRUM_N - 1) {
+        printf(",");
+      }
+    }
+    printf(")\n");
+
+    printf("//    Ozone Absorption:    (");
+    for (int i = 0; i < SKY_SPECTRUM_N; i++) {
+      printf("%e", INT_PARAMS.ozone_absorption.v[i]);
+      if (i != SKY_SPECTRUM_N - 1) {
+        printf(",");
+      }
+    }
+    printf(")\n");
+#else
+    INT_PARAMS.sun_color.r = sunRadianceAtWavelength(PARAMS.wavelength_red);
+    INT_PARAMS.sun_color.g = sunRadianceAtWavelength(PARAMS.wavelength_green);
+    INT_PARAMS.sun_color.b = sunRadianceAtWavelength(PARAMS.wavelength_blue);
 
     INT_PARAMS.rayleigh_scattering.r = computeRayleighScattering(PARAMS.wavelength_red);
     INT_PARAMS.rayleigh_scattering.g = computeRayleighScattering(PARAMS.wavelength_green);
@@ -1084,6 +1257,7 @@ void renderPathTracer(  const skyPathTracerParams        model,
     INT_PARAMS.ozone_absorption.b = computeOzoneAbsorption(PARAMS.wavelength_blue);
 
     printf("//    Ozone Absorption: (%e,%e,%e)\n", INT_PARAMS.ozone_absorption.r, INT_PARAMS.ozone_absorption.g, INT_PARAMS.ozone_absorption.b);
+#endif
 
     INT_PARAMS.tm_lut = (RGBF*)0;
     if (PARAMS.use_tm_lut) {
@@ -1110,10 +1284,12 @@ void renderPathTracer(  const skyPathTracerParams        model,
     for (int y = 0; y < resolution; y++) {
       const vec3 ray = normalize_vector(pixelToDirection(x, y, resolution, view));
 
-      RGBF radiance;
+      sRGBF radiance;
 
       if (ray.x == 0.0f && ray.y == 0.0f && ray.z == 0.0f) {
-        radiance = get_color(0.0f, 0.0f, 0.0f);
+        radiance.r = 0.0f;
+        radiance.g = 0.0f;
+        radiance.b = 0.0f;
       } else {
         radiance = sky_compute_atmosphere(pos, ray, FLT_MAX);
       }
