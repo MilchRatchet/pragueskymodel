@@ -1,6 +1,6 @@
 # Fork
 
-This fork includes an implementation of an atmosphere renderer I wrote with goal of improving the atmosphere rendering in [Luminary](https://github.com/MilchRatchet/Luminary). I changed the UI so that I can compare my implementation with this model. The result is not perfect but I am not sure whether the remaining error is my fault or due to the nature of the method. Unfortunately, I don't have an implementation of the Hillaire2020 model in this.
+This fork includes an implementation of an atmosphere renderer I wrote with goal of improving the atmosphere rendering in [Luminary](https://github.com/MilchRatchet/Luminary). I changed the UI so that I can compare my implementation with this model. The result is not perfect but I am not sure whether the remaining error is my fault or due to the nature of the method. Unfortunately, I don't have an implementation of the Hillaire2020 model in this. Note that while my implementation is called a path tracer, it is just a ray marcher.
 
 # Prague Sky Model
 

@@ -763,6 +763,9 @@ __device__ sRGBF sky_convert_wavelengths_to_sRGB(RGBF radiance) {
     y += CieColorMatchingFunctionTableValue(INT_PARAMS.wavelengths.v[i], 2) * radiance.v[i];
     z += CieColorMatchingFunctionTableValue(INT_PARAMS.wavelengths.v[i], 3) * radiance.v[i];
   }
+  x /= SKY_SPECTRUM_N;
+  y /= SKY_SPECTRUM_N;
+  z /= SKY_SPECTRUM_N;
 #else
   float step_size = 1.0f;
   for (float lambda = SKY_WAVELENGTH_MIN; lambda < SKY_WAVELENGTH_MAX; lambda += step_size) {

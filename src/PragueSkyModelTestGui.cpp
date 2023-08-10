@@ -613,7 +613,7 @@ int main(int argc, char* argv[]) {
                 1, /* OZONE_ABSORPTION */
                 40, /* SHADOW_STEPS */
                 1.0f, /* BASE_DENSITY */
-                10.0f, /* SUN_STRENGTH */
+                100.0f, /* SUN_STRENGTH */
                 100, /* STEPS */
                 0, /* Phase Function */
                 0.8f, /* MIE G */
