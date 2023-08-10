@@ -637,7 +637,8 @@ int main(int argc, char* argv[]) {
                 1, /* Static Sun Solid Angle */
                 15.0f, /* Ozone Layer Thickness */
                 1, /* Uniform Wavelengths */
-                {380.0,  420.0,  460.0,  500.0,  540.0,  580.0, 620.0,  660.0} /* Wavelengths */
+                {380.0,  420.0,  460.0,  500.0,  540.0,  580.0, 620.0,  660.0}, /* Wavelengths */
+                0 /* Use Tracking */
         };
 
         // Input window
@@ -950,6 +951,7 @@ int main(int argc, char* argv[]) {
             }
             ImGui::Checkbox("use static sun solid angle", (bool*)&ptParams.use_static_sun_solid_angle);
             ImGui::SliderFloat("ozone layer thickness", &ptParams.ozone_layer_thickness, 0.1f, 25.0f, "%.1f km");
+            ImGui::Checkbox("use tracking", (bool*)&ptParams.use_tracking);
 
             ImGui::Dummy(ImVec2(0.0f, 1.0f));
             ImGui::Separator();

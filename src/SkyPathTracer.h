@@ -36,6 +36,7 @@ struct skyPathTracerParams {
     float ozone_layer_thickness;
     int uniform_wavelengths;
     float wavelengths[SKY_SPECTRUM_N];
+    int use_tracking;
 } typedef skyPathTracerParams;
 
 void renderPathTracer(  const skyPathTracerParams        model,

@@ -8,6 +8,7 @@
 #include <math.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <stdint.h>
 
 #define __device__ static
 
@@ -783,13 +784,182 @@ __device__ sRGBF sky_convert_wavelengths_to_sRGB(RGBF radiance) {
   return result;
 }
 
-__device__ sRGBF sky_compute_atmosphere(const vec3 origin, const vec3 ray, const float limit) {
+__device__ uint32_t __uswap16p(const uint32_t a) {
+  return (a >> 16) | (a << 16);
+}
+
+__device__ uint16_t random_uint16_t(const uint32_t offset) {
+  const uint32_t key     = 0x55555555;
+  const uint32_t counter = offset;
+
+  uint32_t x = counter * key;
+  uint32_t y = counter * key;
+  uint32_t z = y + key;
+
+  x = x * x + y;
+  x = __uswap16p(x);
+
+  x = x * x + z;
+  x = __uswap16p(x);
+
+  return (x * x + y) >> 16;
+}
+
+__device__ float white_noise_offset(const uint32_t offset) {
+  return ((float) random_uint16_t(offset)) / ((float) UINT16_MAX);
+}
+
+__device__ float sky_tracking_sample_intersection(const float rand, const float free_path_coef, const float max_dist) {
+  // [FonWKH17] Equation 15
+  const float t = (-logf(1.0f - rand)) / free_path_coef;
+
+  if (t > max_dist)
+    return FLT_MAX;
+
+  return t;
+}
+
+// Delta tracking approach
+__device__ float sky_tracking(const vec3 origin, const vec3 ray, const float wavelength) {
+  uint32_t rand_key = (*(uint32_t*)(&ray.x)) ^ (*(uint32_t*)(&ray.y)) ^ (*(uint32_t*)(&ray.z));
+
+  float sum = 0.0f;
+
+  const float sun_color = sky_interpolate_radiance_at_wavelength(INT_PARAMS.sun_color, wavelength) * PARAMS.sun_strength;
+
+  const float max_rayleigh_density = sky_rayleigh_density(0.0f);
+  const float max_mie_density = sky_mie_density(0.0f);
+  const float max_ozone_density = sky_ozone_density(0.0f);
+
+  const float rayleigh_scattering = sky_interpolate_radiance_at_wavelength(SKY_RAYLEIGH_SCATTERING, wavelength);
+  const float mie_scattering = sky_interpolate_radiance_at_wavelength(SKY_MIE_SCATTERING, wavelength);
+  const float ozone_absorption = sky_interpolate_radiance_at_wavelength(SKY_OZONE_EXTINCTION, wavelength);
+
+  const float free_path_coef = max_rayleigh_density * rayleigh_scattering + max_mie_density * mie_scattering;
+
+  float light_angle;
+  if (PARAMS.use_static_sun_solid_angle) {
+    light_angle = sample_sphere_solid_angle(INT_PARAMS.sun_pos, SKY_SUN_RADIUS, origin);
+  }
+
+  const int num_iterations = 100;
+
+  for (int j = 0; j < num_iterations; j++) {
+    float intensity = 0.0f;
+    float transmittance = 1.0f;
+
+    vec3 pos = origin;
+    vec3 dir = ray;
+
+    for (int i = 0; i < PARAMS.steps; i++) {
+      float2 path = sky_compute_path(pos, dir, SKY_EARTH_RADIUS, SKY_ATMO_RADIUS);
+
+      const float t = sky_tracking_sample_intersection(white_noise_offset(rand_key++), free_path_coef, path.y);
+
+      if (t == FLT_MAX) break;
+
+      pos = add_vector(pos, scale_vector(dir, t));
+      const float height = sky_height(pos);
+
+      if (height < 0.0f) break;
+
+      const float rayleigh_density = sky_rayleigh_density(height);
+      const float mie_density = sky_mie_density(height);
+      const float ozone_density = sky_ozone_density(height);
+
+      const float rayleigh_prob = (rayleigh_density * rayleigh_scattering) / free_path_coef;
+      const float mie_prob = (mie_density * mie_scattering) / free_path_coef;
+      const float ozone_prob = (ozone_density * ozone_absorption) / free_path_coef;
+
+      const float r = white_noise_offset(rand_key++);
+
+      if (r < rayleigh_prob) {
+        const vec3 ray_light  = normalize_vector(sub_vector(INT_PARAMS.sun_pos, pos));
+        const float cos_angle_light = dot_product(dir, ray_light);
+        const float phase_rayleigh_light = sky_rayleigh_phase(cos_angle_light);
+
+        const float shadow = sph_ray_hit_p0(ray_light, pos, SKY_EARTH_RADIUS) ? 0.0f : 1.0f;
+
+        float extinction_light;
+        if (PARAMS.use_tm_lut) {
+          const float zenith_cos_angle = dot_product(normalize_vector(pos), ray_light);
+          const float2 tm_uv = sky_transmittance_lut_uv(height, zenith_cos_angle);
+          extinction_light = sky_interpolate_radiance_at_wavelength(sky_sample_tex(INT_PARAMS.tm_lut, tm_uv, SKY_TM_TEX_WIDTH, SKY_TM_TEX_HEIGHT), wavelength);
+        } else {
+          const float scatter_distance = sph_ray_int_p0(ray_light, pos, SKY_ATMO_RADIUS);
+          extinction_light = sky_interpolate_radiance_at_wavelength(sky_extinction(pos, ray_light, 0.0f, scatter_distance), wavelength);
+        }
+
+        if (!PARAMS.use_static_sun_solid_angle) {
+          light_angle = sample_sphere_solid_angle(INT_PARAMS.sun_pos, SKY_SUN_RADIUS, pos);
+        }
+
+        const float radiance_light = extinction_light * phase_rayleigh_light * shadow * light_angle * sun_color;
+
+        intensity += radiance_light * transmittance;
+
+        float a = 2.0f * white_noise_offset(rand_key++) - 1.0f;
+        float b = white_noise_offset(rand_key++);
+        vec3 ray_scatter = sample_ray_sphere(a, b);
+        const float cos_angle_scatter = dot_product(dir, ray_scatter);
+        const float phase_rayleigh_scatter = sky_rayleigh_phase(cos_angle_scatter);
+
+        transmittance *= phase_rayleigh_scatter;
+        dir = ray_scatter;
+      } else if (r < rayleigh_prob + mie_prob) {
+        const vec3 ray_light  = normalize_vector(sub_vector(INT_PARAMS.sun_pos, pos));
+        const float cos_angle_light = dot_product(dir, ray_light);
+        const float phase_mie_light = sky_rayleigh_phase(cos_angle_light);
+
+        const float shadow = sph_ray_hit_p0(ray_light, pos, SKY_EARTH_RADIUS) ? 0.0f : 1.0f;
+
+        float extinction_light;
+        if (PARAMS.use_tm_lut) {
+          const float zenith_cos_angle = dot_product(normalize_vector(pos), ray_light);
+          const float2 tm_uv = sky_transmittance_lut_uv(height, zenith_cos_angle);
+          extinction_light = sky_interpolate_radiance_at_wavelength(sky_sample_tex(INT_PARAMS.tm_lut, tm_uv, SKY_TM_TEX_WIDTH, SKY_TM_TEX_HEIGHT), wavelength);
+        } else {
+          const float scatter_distance = sph_ray_int_p0(ray_light, pos, SKY_ATMO_RADIUS);
+          extinction_light = sky_interpolate_radiance_at_wavelength(sky_extinction(pos, ray_light, 0.0f, scatter_distance), wavelength);
+        }
+
+        if (!PARAMS.use_static_sun_solid_angle) {
+          light_angle = sample_sphere_solid_angle(INT_PARAMS.sun_pos, SKY_SUN_RADIUS, pos);
+        }
+
+        const float radiance_light = extinction_light * phase_mie_light * shadow * light_angle * sun_color;
+
+        intensity += radiance_light * transmittance;
+
+        float a = 2.0f * white_noise_offset(rand_key++) - 1.0f;
+        float b = white_noise_offset(rand_key++);
+        vec3 ray_scatter = sample_ray_sphere(a, b);
+        const float cos_angle_scatter = dot_product(dir, ray_scatter);
+        const float phase_mie_scatter = sky_mie_phase(cos_angle_scatter);
+
+        transmittance *= phase_mie_scatter;
+        dir = ray_scatter;
+      } else if (r < rayleigh_prob + mie_prob + ozone_prob) {
+        // Absorption Collision
+        break;
+      } else {
+        // Null Collision
+      }
+    }
+
+    sum += intensity;
+  }
+
+  return sum / num_iterations;
+}
+
+__device__ RGBF sky_compute_atmosphere(const vec3 origin, const vec3 ray, const float limit) {
   RGBF result = get_color(0.0f, 0.0f, 0.0f);
 
   float2 path = sky_compute_path(origin, ray, SKY_EARTH_RADIUS, SKY_ATMO_RADIUS);
 
   if (path.y == -FLT_MAX) {
-    return sky_convert_wavelengths_to_sRGB(result);
+    return result;
   }
 
   const float start    = path.x;
@@ -916,7 +1086,7 @@ __device__ sRGBF sky_compute_atmosphere(const vec3 origin, const vec3 ray, const
     result = add_color(result, scale_color(mul_color(scale_color(INT_PARAMS.sun_color, PARAMS.sun_strength), mul_color(transmittance, extinction_sun)), PARAMS.ground_albedo * zenith_cos_angle * light_angle / PI));
   }
 
-  return sky_convert_wavelengths_to_sRGB(result);
+  return result;
 }
 
 static vec3 angles_to_direction(const float altitude, const float azimuth) {
@@ -1372,7 +1542,15 @@ void renderPathTracer(  const skyPathTracerParams        model,
         radiance.g = 0.0f;
         radiance.b = 0.0f;
       } else {
-        radiance = sky_compute_atmosphere(pos, ray, FLT_MAX);
+        RGBF spectrum;
+        if (PARAMS.use_tracking) {
+          for (int i = 0; i < SKY_SPECTRUM_N; i++) {
+            spectrum.v[i] = sky_tracking(pos, ray, INT_PARAMS.wavelengths.v[i]);
+          }
+        } else {
+          spectrum = sky_compute_atmosphere(pos, ray, FLT_MAX);
+        }
+        radiance = sky_convert_wavelengths_to_sRGB(spectrum);
       }
 
       dst[x * resolution + y] = radiance;
