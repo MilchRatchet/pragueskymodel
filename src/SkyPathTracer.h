@@ -5,6 +5,8 @@
 extern "C" {
 #endif
 
+#define SKY_SPECTRUM_N 8
+
 struct skyPathTracerParams {
     int ozone_absorption;
     int shadow_steps;
@@ -31,6 +33,8 @@ struct skyPathTracerParams {
     float ground_albedo;
     int use_static_sun_solid_angle;
     float ozone_layer_thickness;
+    int uniform_wavelengths;
+    float wavelengths[SKY_SPECTRUM_N];
 } typedef skyPathTracerParams;
 
 void renderPathTracer(  const skyPathTracerParams        model,

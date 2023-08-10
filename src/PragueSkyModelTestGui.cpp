@@ -427,7 +427,7 @@ int main(int argc, char* argv[]) {
     // The full window and the input subwindow dimensions.
 #ifdef _WIN32
     const int         windowWidthInput  = 440;
-    const int         windowHeightInput = 1080;
+    const int         windowHeightInput = 1300;
     const std::string dirSeparator      = "\\";
     const int         windowWidthImage  = 1080;
     const int         windowHeightImage = 1080;
@@ -613,7 +613,7 @@ int main(int argc, char* argv[]) {
                 40, /* SHADOW_STEPS */
                 1.0f, /* BASE_DENSITY */
                 10.0f, /* SUN_STRENGTH */
-                40, /* STEPS */
+                100, /* STEPS */
                 0, /* USE CS MIE */
                 0.8f, /* MIE G */
                 1.0f, /* Rayleigh Density*/
@@ -633,7 +633,9 @@ int main(int argc, char* argv[]) {
                 1, /* Ground */
                 0.3f, /* Ground Albedo */
                 1, /* Static Sun Solid Angle */
-                15.0f /* Ozone Layer Thickness */
+                15.0f, /* Ozone Layer Thickness */
+                1, /* Uniform Wavelengths */
+                {380.0,  420.0,  460.0,  500.0,  540.0,  580.0, 620.0,  660.0} /* Wavelengths */
         };
 
         // Input window
@@ -910,9 +912,25 @@ int main(int argc, char* argv[]) {
             ImGui::SliderFloat("density ozone", &ptParams.density_ozone, 0.0f, 10.0f, "%.3f");
             ImGui::SliderFloat("height falloff rayleigh", &ptParams.rayleigh_height_falloff, 0.1f, 20.0f, "%.3f");
             ImGui::SliderFloat("height falloff mie", &ptParams.mie_height_falloff, 0.1f, 20.0f, "%.3f");
-            ImGui::SliderFloat("wavelength red", &ptParams.wavelength_red, 380.0f, 750.0f, "%.1f");
-            ImGui::SliderFloat("wavelength green", &ptParams.wavelength_green, 380.0f, 750.0f, "%.1f");
-            ImGui::SliderFloat("wavelength blue", &ptParams.wavelength_blue, 380.0f, 750.0f, "%.1f");
+            ImGui::Checkbox("Uniform Wavelengths", (bool*)&ptParams.uniform_wavelengths);
+
+            if (ptParams.uniform_wavelengths) {
+                ImGui::SliderFloat("wavelength red", &ptParams.wavelength_red, 380.0f, 750.0f, "%.1f");
+                ImGui::SliderFloat("wavelength green", &ptParams.wavelength_green, 380.0f, 750.0f, "%.1f");
+                ImGui::SliderFloat("wavelength blue", &ptParams.wavelength_blue, 380.0f, 750.0f, "%.1f");
+
+                for (int i = 0; i < SKY_SPECTRUM_N; i++) {
+                    ptParams.wavelengths[i] = ptParams.wavelength_blue + i * (ptParams.wavelength_red - ptParams.wavelength_blue) / (SKY_SPECTRUM_N - 1);
+                }
+            } else {
+                char* wavelength_label = (char*) malloc(64);
+                for (int i = 0; i < SKY_SPECTRUM_N; i++) {
+                    sprintf(wavelength_label, "wavelength %d", i);
+                    if (ImGui::SliderFloat(wavelength_label, &ptParams.wavelengths[i], 380.0f, 750.0f, "%.1f") && autorender) rendering = true;
+                }
+                free(wavelength_label);
+            }
+
             ImGui::SliderFloat("CO2 percentage", &ptParams.carbondioxide_percent, 0.0f, 1.0f, "%.3f");
             ImGui::Checkbox("use multiscattering", (bool*)&ptParams.use_ms);
             ImGui::SliderFloat("ground visibility", &ptParams.ground_visibility, 20.0f, 131.8f, "%.1f km");
@@ -1049,41 +1067,6 @@ int main(int argc, char* argv[]) {
             // Save section end
             if (!rendered || rendering) {
                 ImGui::EndDisabled();
-            }
-
-            /////////////////////////////////////////////
-            // Help
-            /////////////////////////////////////////////
-
-            ImVec2 bottomPos = ImVec2(5, ImGui::GetWindowSize().y - 35.f);
-            ImGui::SetCursorPos(bottomPos);
-            if (ImGui::Button("?", ImVec2(30.f, 30.f))) {
-                ImGui::OpenPopup("helpPopup");
-            }
-            ImGui::SameLine();
-            if (ImGui::BeginPopup("helpPopup")) {
-                ImGui::Text("Instructions:");
-                ImGui::Indent();
-                ImGui::Text("1. Select model dataset file in the 'Dataset' section and hit 'Load'.");
-                ImGui::Text("2. Select sky parameters you wish to render in the 'Configuration' section and "
-                            "hit 'Render'. The result will show up on the right.");
-                ImGui::Indent();
-                ImGui::Text("You can also check 'Auto-update' and the rendered image will update "
-                            "automatically with any change in the 'Configuration' section.");
-                ImGui::Unindent();
-                ImGui::Indent();
-                ImGui::Text("Note: You can use CTRL + Click on the sliders to input values directly.");
-                ImGui::Unindent();
-                ImGui::Text("3. Select whether to display all visible channels combined in one sRGB image or "
-                            "individual channels in the 'Channels' section.");
-                ImGui::Text("4. Modify the way the result is displayed in the 'Display' section.");
-                ImGui::Text("5. Save the result to a file in the 'Save' section.");
-                ImGui::Indent();
-                ImGui::Text(
-                    "Note: The result being saved is not affected by settings from the 'Display' section.");
-                ImGui::Unindent();
-                ImGui::Unindent();
-                ImGui::EndPopup();
             }
 
             ImGui::End();

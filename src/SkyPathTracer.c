@@ -50,7 +50,6 @@
 #define SKY_TM_TEX_HEIGHT 64
 
 #define SKY_USE_WIDE_SPECTRUM 1
-#define SKY_SPECTRUM_N 8
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
 //  Math Helper Section
@@ -484,8 +483,8 @@ __device__ float2 sky_transmittance_lut_uv(float height, float zenith_cos_angle)
 	float H = sqrtf(fmaxf(0.0f, SKY_ATMO_RADIUS * SKY_ATMO_RADIUS - SKY_EARTH_RADIUS * SKY_EARTH_RADIUS));
 	float rho = sqrtf(fmaxf(0.0f, height * height - SKY_EARTH_RADIUS * SKY_EARTH_RADIUS));
 
-	float discriminant = height * height * (zenith_cos_angle * zenith_cos_angle - 1.0) + SKY_ATMO_RADIUS * SKY_ATMO_RADIUS;
-	float d = fmaxf(0.0, (-height * zenith_cos_angle + sqrtf(discriminant))); // Distance to atmosphere boundary
+	float discriminant = height * height * (zenith_cos_angle * zenith_cos_angle - 1.0f) + SKY_ATMO_RADIUS * SKY_ATMO_RADIUS;
+	float d = fmaxf(0.0f, (-height * zenith_cos_angle + sqrtf(discriminant))); // Distance to atmosphere boundary
 
 	float d_min = SKY_ATMO_RADIUS - height;
 	float d_max = rho + H;
@@ -767,7 +766,7 @@ __device__ sRGBF sky_compute_atmosphere(const vec3 origin, const vec3 ray, const
       const float height = sky_height(pos);
 
       const vec3 ray_scatter  = normalize_vector(sub_vector(INT_PARAMS.sun_pos, pos));
-      const float cos_angle = fmaxf(0.0f, dot_product(ray, ray_scatter));
+      const float cos_angle = dot_product(ray, ray_scatter);
       const float phase_rayleigh = sky_rayleigh_phase(cos_angle);
       const float phase_mie      = sky_mie_phase(cos_angle);
 
@@ -964,7 +963,7 @@ static msScatteringResult computeMultiScatteringIntegration(const vec3 origin, c
     float step_size       = distance / steps;
     float reach           = start;
 
-    const float light_angle = sample_sphere_solid_angle(INT_PARAMS.sun_pos, SKY_SUN_RADIUS, origin);
+    const float light_angle = sample_sphere_solid_angle(sun_pos, SKY_SUN_RADIUS, origin);
 
     RGBF transmittance = get_color(1.0f, 1.0f, 1.0f);
 
@@ -1200,9 +1199,8 @@ void renderPathTracer(  const skyPathTracerParams        model,
 
     INT_PARAMS.sun_pos = sun_pos;
 #if SKY_USE_WIDE_SPECTRUM
-    //get_color(1.474f, 1.8504f, 1.91198f);
     for (int i = 0; i < SKY_SPECTRUM_N; i++) {
-      INT_PARAMS.wavelengths.v[i] = PARAMS.wavelength_blue + i * (PARAMS.wavelength_red - PARAMS.wavelength_blue) / (SKY_SPECTRUM_N - 1);
+      INT_PARAMS.wavelengths.v[i] = PARAMS.wavelengths[i];
     }
 
     for (int i = 0; i < SKY_SPECTRUM_N; i++) {
@@ -1246,6 +1244,32 @@ void renderPathTracer(  const skyPathTracerParams        model,
       }
     }
     printf(")\n");
+
+    printf("//    Color Conversion Values:    \n//    {");
+    printf("{");
+    for (int i = 0; i < SKY_SPECTRUM_N; i++) {
+      printf("%.7f", CieColorMatchingFunctionTableValue(INT_PARAMS.wavelengths.v[i], 1));
+      if (i != SKY_SPECTRUM_N - 1) {
+        printf(",");
+      }
+    }
+    printf("},\n");
+    printf("//     {");
+    for (int i = 0; i < SKY_SPECTRUM_N; i++) {
+      printf("%.7f", CieColorMatchingFunctionTableValue(INT_PARAMS.wavelengths.v[i], 2));
+      if (i != SKY_SPECTRUM_N - 1) {
+        printf(",");
+      }
+    }
+    printf("},\n");
+    printf("//     {");
+    for (int i = 0; i < SKY_SPECTRUM_N; i++) {
+      printf("%.7f", CieColorMatchingFunctionTableValue(INT_PARAMS.wavelengths.v[i], 3));
+      if (i != SKY_SPECTRUM_N - 1) {
+        printf(",");
+      }
+    }
+    printf("}}\n");
 #else
     INT_PARAMS.sun_color.r = sunRadianceAtWavelength(PARAMS.wavelength_red);
     INT_PARAMS.sun_color.g = sunRadianceAtWavelength(PARAMS.wavelength_green);
