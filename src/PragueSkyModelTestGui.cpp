@@ -408,6 +408,7 @@ int main(int argc, char* argv[]) {
                                          "only visibilities 40.0 - 59.4 km",
                                          "only visibilities 59.4 - 90.0 km",
                                          "only visibilities 90.0 - 131.8 km" };
+    const char* phaseFunctions[] = {"Henyey-Greenstein", "Cornette-Shanks", "Jendersie-Eon"};
 
     // Default ranges
     PragueSkyModel::AvailableData available;
@@ -614,8 +615,9 @@ int main(int argc, char* argv[]) {
                 1.0f, /* BASE_DENSITY */
                 10.0f, /* SUN_STRENGTH */
                 100, /* STEPS */
-                0, /* USE CS MIE */
+                0, /* Phase Function */
                 0.8f, /* MIE G */
+                2.0f, /* MIE Diameter */
                 1.0f, /* Rayleigh Density*/
                 1.0f, /* Mie Density*/
                 1.0f, /* Ozone Density*/
@@ -905,8 +907,9 @@ int main(int argc, char* argv[]) {
                                10000,
                                "%d",
                                ImGuiSliderFlags_AlwaysClamp);
-            ImGui::Checkbox("use cs mie phase", (bool*)&ptParams.use_cs_mie);
+            ImGui::Combo("phase function", &ptParams.phase_function, phaseFunctions, IM_ARRAYSIZE(phaseFunctions));
             ImGui::SliderFloat("mie g", &ptParams.mie_g, -1.0f, 1.0f, "%.3f");
+            ImGui::SliderFloat("mie diameter", &ptParams.mie_diameter, 0.01f, 50.0f, "%.3f");
             ImGui::SliderFloat("density rayleigh", &ptParams.density_rayleigh, 0.0f, 10.0f, "%.3f");
             ImGui::SliderFloat("density mie", &ptParams.density_mie, 0.0f, 10.0f, "%.3f");
             ImGui::SliderFloat("density ozone", &ptParams.density_ozone, 0.0f, 10.0f, "%.3f");

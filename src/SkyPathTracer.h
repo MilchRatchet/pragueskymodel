@@ -13,8 +13,9 @@ struct skyPathTracerParams {
     float base_density;
     float sun_strength;
     int steps;
-    int use_cs_mie;
+    int phase_function;
     float mie_g;
+    float mie_diameter;
     float density_rayleigh;
     float density_mie;
     float density_ozone;

@@ -301,7 +301,12 @@ __device__ RGBF exp_color(const RGBF a) {
 }
 #endif
 
+__device__ vec3 sample_ray_sphere(const float alpha, const float beta) {
+  const float a = sqrtf(1.0f - alpha * alpha);
+  const float b = 2.0f * PI * beta;
 
+  return get_vector(a * cosf(b), a * sinf(b), alpha);
+}
 
 /*
  * Computes the distance to the first intersection of a ray with a sphere. To check for any hit use sphere_ray_hit.
@@ -450,8 +455,54 @@ __device__ float cornette_shanks(const float cos_angle, const float g) {
 	return (3.0f * (1.0f - g * g) * (1.0f + cos_angle * cos_angle)) / (4.0f * PI * 2.0f * (2.0f + g * g) * pow(1.0f + g * g - 2.0f * g * cos_angle, 3.0f/2.0f));
 }
 
-__device__ float henvey_greenstein(const float cos_angle, const float g) {
+__device__ float henyey_greenstein(const float cos_angle, const float g) {
   return (1.0f - g * g) / (4.0f * PI * powf(1.0f + g * g - 2.0f * g * cos_angle, 1.5f));
+}
+
+__device__ float draine(const float cos_angle, const float g, const float alpha) {
+  return henyey_greenstein(cos_angle, g)
+         * ((1.0f + alpha * cos_angle * cos_angle) / (1.0f + (alpha / 3.0f) * (1.0f + 2.0f * g * g)));
+}
+
+
+__device__ float jendersie_eon(const float cos_angle, const float diameter) {
+  float g_hg, g_d, alpha, w_d;
+
+  const float d = diameter;
+
+  if (d >= 5.0f && d <= 50.0f) {
+    g_hg  = expf(-0.0990567f / (d - 1.67154f));
+    g_d   = expf(-(2.20679f / (d + 3.91029f)) - 0.428934f);
+    alpha = expf(3.62489f - (8.29288f / (d + 5.52825f)));
+    w_d   = expf(-(0.599085f / (d - 0.641583f)) - 0.665888f);
+  }
+  else if (d >= 1.5f && d < 5.0f) {
+    g_hg  = 0.0604931f * logf(logf(d)) + 0.940256f;
+    g_d   = 0.500411f - (0.081287f / (-2.0f * logf(d) + tanf(logf(d)) + 1.27551f));
+    alpha = 7.30354f * logf(d) + 6.31675f;
+    w_d   = 0.026914f * (logf(d) - cosf(5.68947f * (logf(logf(d)) - 0.0292149f))) + 0.376475f;
+  }
+  else if (d >= 0.1f && d < 1.5f) {
+    g_hg = 0.862f - 0.143f * logf(d) * logf(d);
+    g_d  = 0.379685f
+                   * cosf(
+                     1.19692f * cosf(((logf(d) - 0.238604f) * (logf(d) + 1.00667f)) / (0.507522f - 0.15677f * logf(d))) + 1.37932f * logf(d)
+                     + 0.0625835f)
+                 + 0.344213f;
+    alpha = 250.0f;
+    w_d   = 0.146209f * cosf(3.38707f * logf(d) + 2.11193f) + 0.316072f + 0.0778917f * logf(d);
+  }
+  else if (d < 0.1f) {
+    g_hg  = 13.8f * d * d;
+    g_d   = 1.1456f * d * sinf(9.29044f * d);
+    alpha = 250.0f;
+    w_d   = 0.252977f - 312.983f * powf(d, 4.3f);
+  }
+
+  const float phase_hg = henyey_greenstein(cos_angle, g_hg);
+  const float phase_d  = draine(cos_angle, g_d, alpha);
+
+  return (1.0f - w_d) * phase_hg + w_d * phase_d;
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -533,10 +584,13 @@ __device__ float sky_rayleigh_phase(const float cos_angle) {
 }
 
 __device__ float sky_mie_phase(const float cos_angle) {
-  if (PARAMS.use_cs_mie) {
-    return cornette_shanks(cos_angle, PARAMS.mie_g);
-  } else {
-    return henvey_greenstein(cos_angle, PARAMS.mie_g);
+  switch(PARAMS.phase_function) {
+    case 0:
+      return henyey_greenstein(cos_angle, PARAMS.mie_g);
+    case 1:
+      return cornette_shanks(cos_angle, PARAMS.mie_g);
+    default:
+      return jendersie_eon(cos_angle, PARAMS.mie_diameter);
   }
 }
 
@@ -959,7 +1013,7 @@ static msScatteringResult computeMultiScatteringIntegration(const vec3 origin, c
   const float distance = path.y;
 
   if (distance > 0.0f) {
-    const int steps       = 40;
+    const int steps       = 500;
     float step_size       = distance / steps;
     float reach           = start;
 
@@ -1077,9 +1131,7 @@ static void computeMultiScattering(RGBF** msTex) {
         float b = 0.5f + (i - ((i/8) * 8));
         float randA = a / sqrt_sample;
         float randB = b / sqrt_sample;
-        float theta = 2.0f * PI * randA;
-        float phi = acosf(1.0f - 2.0f * randB) - 0.5f * PI;
-        vec3 ray = angles_to_direction(phi, theta);
+        vec3 ray = sample_ray_sphere(2.0f * randA - 1.0f, randB);
 
         msScatteringResult result = computeMultiScatteringIntegration(pos, ray, sun_pos);
 
@@ -1100,7 +1152,7 @@ static void computeMultiScattering(RGBF** msTex) {
 }
 
 static RGBF computeTransmittanceOpticalDepth(float r, float mu) {
-  const int steps = 500;
+  const int steps = 2500;
 
   // Distance to top of atmosphere
   const float disc = r * r * (mu * mu - 1.0f) + SKY_ATMO_RADIUS * SKY_ATMO_RADIUS;
