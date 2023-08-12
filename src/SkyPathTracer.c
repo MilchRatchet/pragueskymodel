@@ -830,15 +830,9 @@ __device__ float sky_tracking(const vec3 origin, const vec3 ray, const float wav
 
   const float sun_color = sky_interpolate_radiance_at_wavelength(INT_PARAMS.sun_color, wavelength) * PARAMS.sun_strength;
 
-  const float max_rayleigh_density = sky_rayleigh_density(0.0f);
-  const float max_mie_density = sky_mie_density(0.0f);
-  const float max_ozone_density = sky_ozone_density(0.0f);
-
   const float rayleigh_scattering = sky_interpolate_radiance_at_wavelength(SKY_RAYLEIGH_SCATTERING, wavelength);
   const float mie_scattering = sky_interpolate_radiance_at_wavelength(SKY_MIE_SCATTERING, wavelength);
   const float ozone_absorption = sky_interpolate_radiance_at_wavelength(SKY_OZONE_EXTINCTION, wavelength);
-
-  const float free_path_coef = max_rayleigh_density * rayleigh_scattering + max_mie_density * mie_scattering;
 
   float light_angle;
   if (PARAMS.use_static_sun_solid_angle) {
@@ -857,6 +851,17 @@ __device__ float sky_tracking(const vec3 origin, const vec3 ray, const float wav
     for (int i = 0; i < PARAMS.steps; i++) {
       float2 path = sky_compute_path(pos, dir, SKY_EARTH_RADIUS, SKY_ATMO_RADIUS);
 
+      // Distance at which height is minimal
+      const float t_min = fmaxf(0.0f, fminf(-dot_product(dir, pos), path.y));
+      const vec3 p_min = add_vector(pos, scale_vector(dir, t_min));
+      const float h_min = sky_height(p_min);
+
+      const float max_rayleigh_density = sky_rayleigh_density(h_min);
+      const float max_mie_density = sky_mie_density(h_min);
+      const float max_ozone_density = sky_ozone_density(h_min);
+
+      const float free_path_coef = max_rayleigh_density * rayleigh_scattering + max_mie_density * mie_scattering;
+
       const float t = sky_tracking_sample_intersection(white_noise_offset(rand_key++), free_path_coef, path.y);
 
       if (t == FLT_MAX) break;
@@ -864,7 +869,7 @@ __device__ float sky_tracking(const vec3 origin, const vec3 ray, const float wav
       pos = add_vector(pos, scale_vector(dir, t));
       const float height = sky_height(pos);
 
-      if (height < 0.0f) break;
+      if (height < 0.0f || height > SKY_ATMO_HEIGHT) break;
 
       const float rayleigh_density = sky_rayleigh_density(height);
       const float mie_density = sky_mie_density(height);
