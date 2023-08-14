@@ -609,6 +609,7 @@ int main(int argc, char* argv[]) {
         static int         visibilityToLoad   = 0;
         static int         wavelength         = 280;
         static float       zoom               = 2.0f;
+        static bool        exportPT           = false;
         static skyPathTracerParams ptParams   = {
                 1, /* OZONE_ABSORPTION */
                 40, /* SHADOW_STEPS */
@@ -1054,10 +1055,12 @@ int main(int argc, char* argv[]) {
                 fileDialogSave.ClearSelected();
             }
 
+            ImGui::Checkbox("Export Path Traced Result", &exportPT);
+
             // Save button
             if (ImGui::Button("Save")) {
                 const char* err = NULL;
-                const int   ret = SaveEXR(result[0].data(),
+                const int   ret = SaveEXR((exportPT) ? resultPt : result[0].data(),
                                         renderedResolution,
                                         renderedResolution,
                                         3,
