@@ -37,6 +37,8 @@ struct skyPathTracerParams {
     int uniform_wavelengths;
     float wavelengths[SKY_SPECTRUM_N];
     int use_tracking;
+    int use_tracking_only;
+    int num_tracking_iterations;
 } typedef skyPathTracerParams;
 
 void renderPathTracer(  const skyPathTracerParams        model,

@@ -230,6 +230,16 @@ __device__ RGBF exp_color(const RGBF a) {
 
   return result;
 }
+
+__device__ float maxh_color(const RGBF a) {
+  float max = 0.0f;
+
+  for (int i = 0; i < SKY_SPECTRUM_N; i++) {
+    max = fmaxf(max, a.v[i]);
+  }
+
+  return max;
+}
 #else
 __device__ RGBF get_color(const float r, const float g, const float b) {
   RGBF result;
@@ -299,6 +309,16 @@ __device__ RGBF exp_color(const RGBF a) {
   result.b = expf(a.b);
 
   return result;
+}
+
+__device__ float maxh_color(const RGBF a) {
+  float max = 0.0f;
+
+  max = fmaxf(max, a.r);
+  max = fmaxf(max, a.g);
+  max = fmaxf(max, a.b);
+
+  return max;
 }
 #endif
 
@@ -961,6 +981,121 @@ __device__ float sky_tracking(const vec3 origin, const vec3 ray, const float wav
   return sum / num_iterations;
 }
 
+__device__ void print_color(const RGBF a) {
+  printf("%f %f %f %f %f %f %f %f\n", a.v[0], a.v[1], a.v[2], a.v[3], a.v[4], a.v[5], a.v[6], a.v[7]);
+}
+
+// Mix of delta tracking and ray marching
+__device__ RGBF sky_march_tracking(const vec3 origin, const vec3 ray) {
+  uint32_t rand_key = (*(uint32_t*)(&ray.x)) ^ (*(uint32_t*)(&ray.y)) ^ (*(uint32_t*)(&ray.z));
+
+  RGBF sum = get_color(0.0f, 0.0f, 0.0f);
+
+  const float max_rayleigh_scattering = maxh_color(SKY_RAYLEIGH_SCATTERING);
+  const float max_mie_scattering = maxh_color(SKY_MIE_SCATTERING);
+
+  const RGBF sun_radiance = scale_color(INT_PARAMS.sun_color, PARAMS.sun_strength);
+
+  float light_angle;
+  if (PARAMS.use_static_sun_solid_angle) {
+    light_angle = sample_sphere_solid_angle(INT_PARAMS.sun_pos, SKY_SUN_RADIUS, origin);
+  }
+
+  const float2 path = sky_compute_path(origin, ray, SKY_EARTH_RADIUS, SKY_ATMO_RADIUS);
+
+  for (int j = 0; j < PARAMS.num_tracking_iterations; j++) {
+    RGBF result = get_color(0.0f, 0.0f, 0.0f);
+    RGBF transmittance = get_color(1.0f, 1.0f, 1.0f);
+    float remaining_distance = path.y;
+
+    vec3 pos = origin;
+
+    for (int i = 0; i < PARAMS.steps; i++) {
+      // Distance at which height is minimal
+      const float t_min = fmaxf(0.0f, fminf(-dot_product(ray, pos), remaining_distance));
+      const vec3 p_min = add_vector(pos, scale_vector(ray, t_min));
+      const float h_min = sky_height(p_min);
+
+      const float max_rayleigh_density = sky_rayleigh_density(h_min) * PARAMS.density_rayleigh;
+      const float max_mie_density = sky_mie_density(h_min) * PARAMS.density_mie;
+
+      const float free_path_coef = max_rayleigh_density * max_rayleigh_scattering + max_mie_density * max_mie_scattering;
+
+      const float t = sky_tracking_sample_intersection(white_noise_offset(rand_key++), free_path_coef, remaining_distance);
+
+      if (t == FLT_MAX) break;
+
+      pos = add_vector(pos, scale_vector(ray, t));
+      remaining_distance -= t;
+      const float height = sky_height(pos);
+
+      if (height < 0.0f || height > SKY_ATMO_HEIGHT) break;
+
+      const float density_rayleigh = sky_rayleigh_density(height) * PARAMS.density_rayleigh;
+      const float density_mie      = sky_mie_density(height) * PARAMS.density_mie;
+      const float density_ozone    = sky_ozone_density(height) * PARAMS.density_ozone;
+
+      const vec3 ray_scatter  = normalize_vector(sub_vector(INT_PARAMS.sun_pos, pos));
+      const float cos_angle = dot_product(ray, ray_scatter);
+      const float phase_rayleigh = sky_rayleigh_phase(cos_angle);
+      const float phase_mie      = sky_mie_phase(cos_angle);
+
+      const float shadow = sph_ray_hit_p0(ray_scatter, pos, SKY_EARTH_RADIUS) ? 0.0f : 1.0f;
+
+      RGBF extinction_sun;
+      if (PARAMS.use_tm_lut) {
+        const float zenith_cos_angle = dot_product(normalize_vector(pos), ray_scatter);
+        const float2 tm_uv = sky_transmittance_lut_uv(height, zenith_cos_angle);
+        extinction_sun = sky_sample_tex(INT_PARAMS.tm_lut, tm_uv, SKY_TM_TEX_WIDTH, SKY_TM_TEX_HEIGHT);
+      } else {
+        const float scatter_distance = sph_ray_int_p0(ray_scatter, pos, SKY_ATMO_RADIUS);
+        extinction_sun = sky_extinction(pos, ray_scatter, 0.0f, scatter_distance);
+      }
+
+      const RGBF scattering_rayleigh = scale_color(SKY_RAYLEIGH_SCATTERING, density_rayleigh);
+      const RGBF scattering_mie = scale_color(SKY_MIE_SCATTERING, density_mie);
+
+      const RGBF extinction_rayleigh = scale_color(SKY_RAYLEIGH_EXTINCTION, density_rayleigh);
+      const RGBF extinction_mie = scale_color(SKY_MIE_EXTINCTION, density_mie);
+      const RGBF extinction_ozone = scale_color(SKY_OZONE_EXTINCTION, density_ozone);
+
+      const RGBF scattering = add_color(scattering_rayleigh, scattering_mie);
+      const RGBF extinction = add_color(add_color(extinction_rayleigh, extinction_mie), extinction_ozone);
+      const RGBF phaseTimesScattering = add_color(scale_color(scattering_rayleigh, phase_rayleigh), scale_color(scattering_mie, phase_mie));
+
+      if (!PARAMS.use_static_sun_solid_angle) {
+        light_angle = sample_sphere_solid_angle(INT_PARAMS.sun_pos, SKY_SUN_RADIUS, pos);
+      }
+
+      const RGBF ssRadiance = scale_color(mul_color(extinction_sun, phaseTimesScattering), shadow * light_angle);
+      RGBF msRadiance = get_color(0.0f, 0.0f, 0.0f);
+
+      if (PARAMS.use_ms) {
+        const float sun_zenith_angle = dot_product(ray_scatter, normalize_vector(pos));
+        const float2 ms_uv = make_float2(sun_zenith_angle * 0.5f + 0.5f, height / SKY_ATMO_HEIGHT);
+        RGBF msTexResult = sky_sample_tex(INT_PARAMS.ms_lut, ms_uv, SKY_MS_TEX_SIZE, SKY_MS_TEX_SIZE);
+        msRadiance = mul_color(msTexResult, scattering);
+      }
+
+      const RGBF S = mul_color(sun_radiance, add_color(ssRadiance, msRadiance));
+
+      RGBF step_transmittance = extinction;
+      step_transmittance = scale_color(step_transmittance, -t);
+      step_transmittance = exp_color(step_transmittance);
+
+      const RGBF Sint = mul_color(sub_color(S, mul_color(S, step_transmittance)), inv_color(extinction));
+
+      result = add_color(result, mul_color(Sint, transmittance));
+
+      transmittance = mul_color(transmittance, step_transmittance);
+    }
+
+    sum = add_color(sum, result);
+  }
+
+  return scale_color(sum, 1.0f / PARAMS.num_tracking_iterations);
+}
+
 __device__ RGBF sky_compute_atmosphere(const vec3 origin, const vec3 ray, const float limit) {
   RGBF result = get_color(0.0f, 0.0f, 0.0f);
 
@@ -1541,19 +1676,24 @@ void renderPathTracer(  const skyPathTracerParams        model,
   #pragma omp parallel for
   for (int x = 0; x < resolution; x++) {
     for (int y = 0; y < resolution; y++) {
-      const vec3 ray = normalize_vector(pixelToDirection(x, y, resolution, view));
+      vec3 ray = pixelToDirection(x, y, resolution, view);
 
       sRGBF radiance;
 
-      if (ray.x == 0.0f && ray.y == 0.0f && ray.z == 0.0f) {
+      if (get_length(ray) < 0.01f) {
         radiance.r = 0.0f;
         radiance.g = 0.0f;
         radiance.b = 0.0f;
       } else {
+        ray = normalize_vector(ray);
         RGBF spectrum;
         if (PARAMS.use_tracking) {
-          for (int i = 0; i < SKY_SPECTRUM_N; i++) {
-            spectrum.v[i] = sky_tracking(pos, ray, INT_PARAMS.wavelengths.v[i]);
+          if (PARAMS.use_tracking_only) {
+            for (int i = 0; i < SKY_SPECTRUM_N; i++) {
+              spectrum.v[i] = sky_tracking(pos, ray, INT_PARAMS.wavelengths.v[i]);
+            }
+          } else {
+            spectrum = sky_march_tracking(pos, ray);
           }
         } else {
           spectrum = sky_compute_atmosphere(pos, ray, FLT_MAX);
